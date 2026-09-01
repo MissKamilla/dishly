@@ -20,10 +20,10 @@
 Продолжать нужно с:
 
 ```text
-Step 6 - Docker Compose для PostgreSQL
+Step 7 - TypeORM подключение к PostgreSQL
 ```
 
-Причина: Step 3 завершен, а Step 4 и Step 5 были выполнены ранее.
+Причина: Step 6 завершен, PostgreSQL запускается через Docker Compose и проходит healthcheck.
 
 При этом Step 4 и Step 5 уже были сделаны раньше:
 
@@ -38,7 +38,7 @@ Step 6 - Docker Compose для PostgreSQL
 - [x] Step 3 - очистить NestJS demo-код.
 - [x] Step 4 - подключить `ConfigModule` и базовый `PORT`.
 - [x] Step 5 - настроить global `ValidationPipe`.
-- [ ] Step 6 - Docker Compose для PostgreSQL.
+- [x] Step 6 - Docker Compose для PostgreSQL.
 - [ ] Step 7 - TypeORM подключение к PostgreSQL.
 - [ ] Step 8 - Redis в Docker Compose.
 - [ ] Step 9 - создать frontend через Vite React TypeScript.
@@ -70,6 +70,17 @@ Step 6 - Docker Compose для PostgreSQL
   - `apps/codex/CODEX_TASK.md` и `apps/codex/AGENT_PROGRESS.md` игнорируются.
 - Подключен `ConfigModule.forRoot({ isGlobal: true })`.
 - Создан `apps/backend/.env.example` с `PORT=3000`.
+- Создан root `.env.example` для Docker Compose PostgreSQL:
+  - `POSTGRES_DB=dishly`;
+  - `POSTGRES_USER=dishly`;
+  - `POSTGRES_PASSWORD=dishly_password`;
+  - `POSTGRES_PORT=5433`.
+- Создан `docker-compose.yml` с PostgreSQL:
+  - image `postgres:16-alpine`;
+  - env variables через `${POSTGRES_*}`;
+  - host port по умолчанию `5433`;
+  - persistent volume `postgres_data`;
+  - healthcheck через `pg_isready`.
 - В `main.ts` сохранена ConfigService-based настройка порта:
 
 ```ts
@@ -91,6 +102,9 @@ app.useGlobalPipes(
 
 - Проверка `npm run build` из `apps/backend` ранее проходила успешно.
 - После Step 3 проверка `npm run build` из `apps/backend` прошла успешно.
+- После Step 6 проверка `docker compose config` прошла успешно.
+- После Step 6 `docker compose up -d` запустил PostgreSQL.
+- После Step 6 `docker compose ps` показал `dishly-postgres-1` в статусе `Up ... (healthy)`.
 
 ## Текущие локальные ignored файлы
 
@@ -107,6 +121,7 @@ app.useGlobalPipes(
 - Для простого monorepo пока не используем Nx, Turborepo или похожие инструменты.
 - Не добавлять Redux Toolkit: server state позже должен идти через TanStack Query.
 - Не добавлять BullMQ на Этапе 1, Redis пока только инфраструктурный сервис.
+- Для Docker Compose PostgreSQL используем host port `5433` по умолчанию, потому что `5432` на машине может быть занят локальным PostgreSQL. Внутри контейнера PostgreSQL остается на `5432`.
 
 ## Правило ведения этого файла дальше
 
