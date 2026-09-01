@@ -1,8 +1,6 @@
 # Рабочие заметки Codex по Dishly
 
-Файл нужен как локальная память по проекту. Он не должен попадать в Git.
-
-Последнее обновление: 2026-08-31.
+Последнее обновление: 2026-09-01.
 
 ## Текущий контекст
 
@@ -12,6 +10,8 @@
 - Последние коммиты:
   - `0fcdf57 chore: initialize project workspace`
   - `1984e26 feat: scaffold NestJS backend`
+  - `8746b12 chore: add Codex workflow notes`
+  - `0a9ab1f chore: remove NestJS demo code`
 - Главный принцип этапа: создать пустую fullstack-основу без бизнес-логики.
 - Нельзя переходить к auth, recipes, parser, queue jobs, entities и другим доменным задачам.
 
@@ -20,10 +20,10 @@
 Продолжать нужно с:
 
 ```text
-Step 7 - TypeORM подключение к PostgreSQL
+Step 9 - создать frontend через Vite React TypeScript
 ```
 
-Причина: Step 6 завершен, PostgreSQL запускается через Docker Compose и проходит healthcheck.
+Причина: Step 8 завершен, PostgreSQL и Redis запускаются через Docker Compose и проходят healthcheck.
 
 При этом Step 4 и Step 5 уже были сделаны раньше:
 
@@ -39,8 +39,8 @@ Step 7 - TypeORM подключение к PostgreSQL
 - [x] Step 4 - подключить `ConfigModule` и базовый `PORT`.
 - [x] Step 5 - настроить global `ValidationPipe`.
 - [x] Step 6 - Docker Compose для PostgreSQL.
-- [ ] Step 7 - TypeORM подключение к PostgreSQL.
-- [ ] Step 8 - Redis в Docker Compose.
+- [x] Step 7 - TypeORM подключение к PostgreSQL.
+- [x] Step 8 - Redis в Docker Compose.
 - [ ] Step 9 - создать frontend через Vite React TypeScript.
 - [ ] Step 10 - подключить React Router.
 - [ ] Step 11 - подключить TanStack Query.
@@ -105,6 +105,21 @@ app.useGlobalPipes(
 - После Step 6 проверка `docker compose config` прошла успешно.
 - После Step 6 `docker compose up -d` запустил PostgreSQL.
 - После Step 6 `docker compose ps` показал `dishly-postgres-1` в статусе `Up ... (healthy)`.
+- После Step 7 пользователь подключил TypeORM к PostgreSQL:
+  - установлены `@nestjs/typeorm`, `typeorm`, `pg`;
+  - `TypeOrmModule.forRootAsync` подключен в `apps/backend/src/app.module.ts`;
+  - конфигурация берется из `ConfigService`;
+  - `autoLoadEntities: true`;
+  - `synchronize: false`.
+- После Step 8 добавлен Redis в `docker-compose.yml`:
+  - image `redis:7-alpine`;
+  - healthcheck через `redis-cli ping`;
+  - внешний порт `6380`, внутренний порт контейнера `6379`.
+- После Step 8 root `.env.example` и `.env` содержат `REDIS_PORT=6380`.
+- После Step 8 `docker compose config` прошел успешно.
+- После Step 8 `docker compose up -d --force-recreate redis` пересоздал Redis.
+- После Step 8 `docker compose ps` показал `dishly-postgres-1` и `dishly-redis-1` в статусе `healthy`.
+- После Step 8 `docker compose exec redis redis-cli ping` вернул `PONG`.
 
 ## Текущие локальные ignored файлы
 
@@ -122,6 +137,7 @@ app.useGlobalPipes(
 - Не добавлять Redux Toolkit: server state позже должен идти через TanStack Query.
 - Не добавлять BullMQ на Этапе 1, Redis пока только инфраструктурный сервис.
 - Для Docker Compose PostgreSQL используем host port `5433` по умолчанию, потому что `5432` на машине может быть занят локальным PostgreSQL. Внутри контейнера PostgreSQL остается на `5432`.
+- Для Docker Compose Redis используем host port `6380` по умолчанию, потому что `6379` на машине уже занят контейнером `verify_redis`. Внутри контейнера Redis остается на `6379`.
 
 ## Правило ведения этого файла дальше
 
