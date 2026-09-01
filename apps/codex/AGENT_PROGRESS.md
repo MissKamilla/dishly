@@ -20,14 +20,10 @@
 Продолжать нужно с:
 
 ```text
-Step 3 - очистить NestJS demo-код
+Step 6 - Docker Compose для PostgreSQL
 ```
 
-Причина: в backend пока остался стандартный NestJS demo-код:
-
-- `apps/backend/src/app.controller.ts` содержит `GET /`;
-- `apps/backend/src/app.service.ts` содержит `getHello()`;
-- `apps/backend/src/app.controller.spec.ts` проверяет `"Hello World!"`.
+Причина: Step 3 завершен, а Step 4 и Step 5 были выполнены ранее.
 
 При этом Step 4 и Step 5 уже были сделаны раньше:
 
@@ -39,7 +35,7 @@ Step 3 - очистить NestJS demo-код
 
 - [x] Step 1 - Git repository и базовая структура проекта.
 - [x] Step 2 - создать backend в `apps/backend`.
-- [ ] Step 3 - очистить NestJS demo-код.
+- [x] Step 3 - очистить NestJS demo-код.
 - [x] Step 4 - подключить `ConfigModule` и базовый `PORT`.
 - [x] Step 5 - настроить global `ValidationPipe`.
 - [ ] Step 6 - Docker Compose для PostgreSQL.
@@ -62,6 +58,12 @@ Step 3 - очистить NestJS demo-код
 - Создана рабочая ветка `feature/project-bootstrap`.
 - Создана базовая структура проекта.
 - Создан NestJS backend в `apps/backend`.
+- Очищен стандартный NestJS demo-код:
+  - удален `apps/backend/src/app.controller.ts`;
+  - удален `apps/backend/src/app.service.ts`;
+  - удален `apps/backend/src/app.controller.spec.ts`;
+  - удален demo e2e-test `apps/backend/test/app.e2e-spec.ts`;
+  - `apps/backend/src/app.module.ts` оставлен минимальным root module с `ConfigModule`.
 - Улучшен `.gitignore`:
   - игнорируются `.env`, `.env.*`, `node_modules/`, `dist/`, `build/`, `coverage/`;
   - `!.env.example` оставлен доступным для Git;
@@ -88,6 +90,7 @@ app.useGlobalPipes(
 ```
 
 - Проверка `npm run build` из `apps/backend` ранее проходила успешно.
+- После Step 3 проверка `npm run build` из `apps/backend` прошла успешно.
 
 ## Текущие локальные ignored файлы
 
