@@ -17,8 +17,6 @@ coverage/
 .env.*
 !.env.example
 
-# Local Codex working files
-apps/codex/
 
 # OS files
 .DS_Store
