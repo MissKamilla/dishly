@@ -20,10 +20,10 @@
 Продолжать нужно с:
 
 ```text
-Step 11 - подключить TanStack Query
+Этап 1 завершен
 ```
 
-Причина: Step 10 завершен, React Router установлен и минимальные маршруты `/`, `/login`, `/recipes` настроены.
+Причина: Step 17 завершен, финальные проверки bootstrap-этапа прошли успешно.
 
 При этом Step 4 и Step 5 уже были сделаны раньше:
 
@@ -43,13 +43,13 @@ Step 11 - подключить TanStack Query
 - [x] Step 8 - Redis в Docker Compose.
 - [x] Step 9 - создать frontend через Vite React TypeScript.
 - [x] Step 10 - подключить React Router.
-- [ ] Step 11 - подключить TanStack Query.
-- [ ] Step 12 - frontend env `VITE_API_URL`.
-- [ ] Step 13 - простой backend `GET /health`.
-- [ ] Step 14 - CORS через env `FRONTEND_URL`.
-- [ ] Step 15 - проверить связь frontend/backend через `/health`.
-- [ ] Step 16 - базовый root `README.md`.
-- [ ] Step 17 - финальная проверка этапа.
+- [x] Step 11 - подключить TanStack Query.
+- [x] Step 12 - frontend env `VITE_API_URL`.
+- [x] Step 13 - простой backend `GET /health`.
+- [x] Step 14 - CORS через env `FRONTEND_URL`.
+- [x] Step 15 - проверить связь frontend/backend через `/health`.
+- [x] Step 16 - базовый root `README.md`.
+- [x] Step 17 - финальная проверка этапа.
 
 ## Уже сделано
 
@@ -127,6 +127,29 @@ app.useGlobalPipes(
 - После Step 10 пользователь установил `react-router-dom`.
 - После Step 10 `BrowserRouter` подключен в `apps/frontend/src/main.tsx`.
 - После Step 10 в `apps/frontend/src/App.tsx` добавлены временные маршруты `/`, `/login`, `/recipes`.
+- После Step 11 пользователь установил `@tanstack/react-query`.
+- После Step 11 `QueryClient` и `QueryClientProvider` подключены в `apps/frontend/src/main.tsx`.
+- После Step 11 пользователь создал коммит `d7012f4 feat: scaffold React frontend`.
+- После Step 12 созданы `apps/frontend/.env.example` и локальный `apps/frontend/.env` с `VITE_API_URL=http://localhost:3000`.
+- После Step 12 `apps/frontend/.env` не отображается в `git status`, потому что игнорируется `.gitignore`.
+- После Step 13 добавлен `apps/backend/src/health.controller.ts` с `GET /health`, который возвращает `{ status: 'ok' }`.
+- После Step 13 `HealthController` зарегистрирован в `apps/backend/src/app.module.ts`.
+- После Step 14 в `apps/backend/.env.example` и локальный `apps/backend/.env` добавлен `FRONTEND_URL=http://localhost:5173`.
+- После Step 14 в `apps/backend/src/main.ts` включен CORS с origin из `ConfigService.getOrThrow<string>('FRONTEND_URL')`.
+- После Step 15 в `apps/frontend/src/App.tsx` добавлен временный TanStack Query запрос на `${VITE_API_URL}/health`.
+- После Step 15 frontend показывает backend status на главной странице.
+- После Step 15 `npm run build` из `apps/frontend` прошел успешно.
+- После Step 15 `npm run build` из `apps/backend` прошел успешно.
+- После Step 15 backend `GET /health` проверен через `curl` и вернул `{"status":"ok"}`.
+- После Step 15 CORS header для `Origin: http://localhost:5173` проверен через `curl`.
+- После Step 16 создан root `README.md` с описанием проекта, stack, prerequisites, env setup, Docker commands, backend/frontend start и build commands.
+- После Step 17 финальные проверки прошли успешно:
+  - `npm run build` из `apps/backend`;
+  - `npm run lint` из `apps/backend`;
+  - `npm run build` из `apps/frontend`;
+  - `npm run lint` из `apps/frontend`;
+  - `docker compose ps`.
+- После Step 17 в `apps/backend/src/main.ts` вызов `bootstrap()` заменен на `void bootstrap();`, чтобы убрать предупреждение `@typescript-eslint/no-floating-promises`.
 
 ## Текущие локальные ignored файлы
 
