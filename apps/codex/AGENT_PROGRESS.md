@@ -1,6 +1,6 @@
 # Рабочие заметки Codex по Dishly
 
-Последнее обновление: 2026-09-01.
+Последнее обновление: 2026-09-02.
 
 ## Текущий контекст
 
@@ -20,10 +20,10 @@
 Продолжать нужно с:
 
 ```text
-Step 9 - создать frontend через Vite React TypeScript
+Step 11 - подключить TanStack Query
 ```
 
-Причина: Step 8 завершен, PostgreSQL и Redis запускаются через Docker Compose и проходят healthcheck.
+Причина: Step 10 завершен, React Router установлен и минимальные маршруты `/`, `/login`, `/recipes` настроены.
 
 При этом Step 4 и Step 5 уже были сделаны раньше:
 
@@ -41,8 +41,8 @@ Step 9 - создать frontend через Vite React TypeScript
 - [x] Step 6 - Docker Compose для PostgreSQL.
 - [x] Step 7 - TypeORM подключение к PostgreSQL.
 - [x] Step 8 - Redis в Docker Compose.
-- [ ] Step 9 - создать frontend через Vite React TypeScript.
-- [ ] Step 10 - подключить React Router.
+- [x] Step 9 - создать frontend через Vite React TypeScript.
+- [x] Step 10 - подключить React Router.
 - [ ] Step 11 - подключить TanStack Query.
 - [ ] Step 12 - frontend env `VITE_API_URL`.
 - [ ] Step 13 - простой backend `GET /health`.
@@ -120,6 +120,13 @@ app.useGlobalPipes(
 - После Step 8 `docker compose up -d --force-recreate redis` пересоздал Redis.
 - После Step 8 `docker compose ps` показал `dishly-postgres-1` и `dishly-redis-1` в статусе `healthy`.
 - После Step 8 `docker compose exec redis redis-cli ping` вернул `PONG`.
+- После Step 9 пользователь создал frontend в `apps/frontend` через Vite React TypeScript.
+- После Step 9 стандартный demo UI заменен на минимальный `Dishly frontend` в `apps/frontend/src/App.tsx`.
+- После Step 9 `apps/frontend/src/index.css` оставлен минимальным базовым CSS.
+- После Step 9 проверка `npm run build` из `apps/frontend` прошла успешно.
+- После Step 10 пользователь установил `react-router-dom`.
+- После Step 10 `BrowserRouter` подключен в `apps/frontend/src/main.tsx`.
+- После Step 10 в `apps/frontend/src/App.tsx` добавлены временные маршруты `/`, `/login`, `/recipes`.
 
 ## Текущие локальные ignored файлы
 
