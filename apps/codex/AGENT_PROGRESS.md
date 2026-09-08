@@ -1,35 +1,47 @@
 # Рабочие заметки Codex по Dishly
 
-Последнее обновление: 2026-09-02.
+Последнее обновление: 2026-09-08.
 
 ## Текущий контекст
 
 - Проект: Dishly.
-- Текущий этап: Этап 1 - Project Bootstrap.
-- Текущая ветка: `feature/project-bootstrap`.
+- Текущий этап: Этап 2 - Database Schema and TypeORM Entities.
+- Текущая ветка: `feature/database-schema`.
 - Последние коммиты:
-  - `0fcdf57 chore: initialize project workspace`
-  - `1984e26 feat: scaffold NestJS backend`
-  - `8746b12 chore: add Codex workflow notes`
-  - `0a9ab1f chore: remove NestJS demo code`
-- Главный принцип этапа: создать пустую fullstack-основу без бизнес-логики.
-- Нельзя переходить к auth, recipes, parser, queue jobs, entities и другим доменным задачам.
+  - `69fdfee Merge pull request #1 from MissKamilla/feature/project-bootstrap`
+  - `f017d83 feat: complete project bootstrap`
+  - `d7012f4 feat: scaffold React frontend`
+  - `2d8995d chore: configure TypeORM and Redis infrastructure`
+  - `a7ee82b chore: add PostgreSQL docker compose service`
+- Главный принцип этапа: реализовать persistence-модель и migrations без бизнес-логики.
+- Нельзя переходить к auth, recipes CRUD, parser, queue jobs, frontend и i18n.
 
 ## На чем остановились
 
 Продолжать нужно с:
 
 ```text
-Этап 1 завершен
+Этап 2 Step 3 - User Entity
 ```
 
-Причина: Step 17 завершен, финальные проверки bootstrap-этапа прошли успешно.
+Причина: Step 2 - TypeORM migrations infrastructure завершен.
 
-При этом Step 4 и Step 5 уже были сделаны раньше:
+Ключевые выводы аудита:
 
-- `ConfigModule` подключен в `apps/backend/src/app.module.ts`;
-- `PORT` читается через `ConfigService` в `apps/backend/src/main.ts`;
-- глобальный `ValidationPipe` настроен в `apps/backend/src/main.ts`.
+- Runtime подключение PostgreSQL сейчас в `apps/backend/src/app.module.ts` через `TypeOrmModule.forRootAsync`.
+- Переменные подключения берутся из `ConfigService`: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`.
+- Сохранено `autoLoadEntities: true` и `synchronize: false`.
+- `apps/backend/tsconfig.json` использует `module: "nodenext"` и `moduleResolution: "nodenext"`.
+- Фактически установлено: `@nestjs/typeorm@12.0.1`, `typeorm@1.1.1`, `pg@8.23.0`.
+- TypeORM CLI доступен через `node_modules/.bin/typeorm` и поддерживает `migration:generate`, `migration:run`, `migration:revert`, `migration:show`.
+- Для CLI нужен отдельный `DataSource`, потому что Nest runtime config с `ConfigService` и `autoLoadEntities` CLI напрямую не использует.
+- Чтобы избежать расхождения runtime и migration config, на Step 2 лучше вынести общую функцию построения PostgreSQL options и использовать ее в `AppModule` и `database/data-source.ts`.
+- Сторонний naming strategy package не нужен; таблицы и важные колонки можно задавать явно в Entity.
+- Migration setup уже создан:
+  - `apps/backend/src/database/typeorm.config.ts`;
+  - `apps/backend/src/database/data-source.ts`;
+  - `apps/backend/src/database/migrations/.gitkeep`;
+  - npm scripts `migration:generate`, `migration:run`, `migration:revert`, `migration:show`.
 
 ## Чеклист Этапа 1
 
@@ -51,10 +63,25 @@
 - [x] Step 16 - базовый root `README.md`.
 - [x] Step 17 - финальная проверка этапа.
 
+## Чеклист Этапа 2
+
+- [x] Step 1 - аудит текущей database-конфигурации.
+- [x] Step 2 - настроить TypeORM migrations.
+- [ ] Step 3 - User Entity.
+- [ ] Step 4 - RecipeStatus и Recipe Entity.
+- [ ] Step 5 - RecipeIngredient Entity.
+- [ ] Step 6 - RecipeStep Entity.
+- [ ] Step 7 - обратные relations.
+- [ ] Step 8 - регистрация Entity.
+- [ ] Step 9 - Initial migration.
+- [ ] Step 11 - проверить migration lifecycle.
+- [ ] Step 12 - объяснить SQL-модель.
+
 ## Уже сделано
 
 - Прочитан `AGENTS.md`.
 - Прочитан `apps/codex/CODEX_TASK.md`.
+- Прочитан `apps/codex/AGENT_PROGRESS.md`.
 - Создана рабочая ветка `feature/project-bootstrap`.
 - Создана базовая структура проекта.
 - Создан NestJS backend в `apps/backend`.
@@ -150,6 +177,22 @@ app.useGlobalPipes(
   - `npm run lint` из `apps/frontend`;
   - `docker compose ps`.
 - После Step 17 в `apps/backend/src/main.ts` вызов `bootstrap()` заменен на `void bootstrap();`, чтобы убрать предупреждение `@typescript-eslint/no-floating-promises`.
+- Этап 2 Step 1 завершен:
+  - изучены `apps/backend/src/app.module.ts`, `apps/backend/.env.example`, `apps/backend/package.json`, `apps/backend/tsconfig.json`, `docker-compose.yml`;
+  - проверено фактическое дерево зависимостей через `npm list typeorm @nestjs/typeorm pg`;
+  - проверены версии пакетов через локальные `package.json` в `node_modules`;
+  - проверен TypeORM CLI через `./node_modules/.bin/typeorm --help`;
+  - проверка `npm run build` из `apps/backend` прошла успешно.
+- Этап 2 Step 2 завершен:
+  - создана/используется ветка `feature/database-schema`;
+  - `dotenv` добавлен как явная backend dependency для загрузки `.env` в TypeORM CLI;
+  - добавлены npm scripts для `migration:generate`, `migration:run`, `migration:revert`, `migration:show`;
+  - создан общий helper `createDatabaseOptions` / `createRuntimeDatabaseOptions`;
+  - создан отдельный TypeORM `DataSource` для CLI;
+  - `AppModule` переведен на общий runtime database config;
+  - создана папка `src/database/migrations`;
+  - `npm run build` из `apps/backend` прошел успешно;
+  - пользователь проверил `migration:generate -- --dr`, `npm run lint`, `docker compose ps`, `git status`, `git diff` - все работает.
 
 ## Текущие локальные ignored файлы
 
@@ -168,6 +211,10 @@ app.useGlobalPipes(
 - Не добавлять BullMQ на Этапе 1, Redis пока только инфраструктурный сервис.
 - Для Docker Compose PostgreSQL используем host port `5433` по умолчанию, потому что `5432` на машине может быть занят локальным PostgreSQL. Внутри контейнера PostgreSQL остается на `5432`.
 - Для Docker Compose Redis используем host port `6380` по умолчанию, потому что `6379` на машине уже занят контейнером `verify_redis`. Внутри контейнера Redis остается на `6379`.
+- На Этапе 2 Step 2 нужен отдельный `DataSource` для TypeORM CLI.
+- Runtime TypeORM config и CLI DataSource используют общий helper без Nest-зависимостей.
+- Текущий `typeorm@1.1.1` выглядит новым ESM-aware пакетом с `DataSource` и CLI wrappers `typeorm-ts-node-commonjs` / `typeorm-ts-node-esm`; для текущего проекта выбран и проверен `typeorm-ts-node-commonjs`.
+- По договоренности с разработчиком: если нужно что-то установить или запустить, сначала дать команду и объяснить зачем; разработчик выполнит команду самостоятельно.
 
 ## Правило ведения этого файла дальше
 

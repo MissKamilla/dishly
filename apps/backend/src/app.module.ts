@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { createRuntimeDatabaseOptions } from './database/typeorm.config';
 import { HealthController } from './health.controller';
 
 @Module({
@@ -10,16 +11,10 @@ import { HealthController } from './health.controller';
     }),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
-        type: 'postgres',
-        host: configService.getOrThrow<string>('DB_HOST'),
-        port: configService.getOrThrow<number>('DB_PORT'),
-        database: configService.getOrThrow<string>('DB_NAME'),
-        username: configService.getOrThrow<string>('DB_USER'),
-        password: configService.getOrThrow<string>('DB_PASSWORD'),
-        autoLoadEntities: true,
-        synchronize: false,
-      }),
+      useFactory: (configService: ConfigService) =>
+        createRuntimeDatabaseOptions((name) =>
+          configService.getOrThrow<string>(name),
+        ),
     }),
   ],
   controllers: [HealthController],

@@ -1,687 +1,1628 @@
-Я начинаю разработку fullstack-проекта **Dishly**.
+# Dishly — Этап 2: Database Schema and TypeORM Entities
 
-Dishly — приложение для хранения рецептов и импорта рецептов по URL.
+Мы продолжаем разработку fullstack-проекта **Dishly**.
 
-В будущем пользователь сможет:
+Перед началом обязательно:
 
-```text
-найти рецепт на внешнем сайте
-→ скопировать ссылку
-→ вставить её в Dishly
-→ рецепт попадёт в очередь обработки
-→ backend получит данные рецепта
-→ нормализует их
-→ сохранит в PostgreSQL
-→ пользователь увидит готовый рецепт
-```
+1. прочитай корневой `AGENTS.md`;
+2. прочитай `apps/codex/AGENT_PROGRESS.md`;
+3. изучи текущее состояние `apps/backend`;
+4. не опирайся только на этот текст — сверяй требования с фактическим кодом проекта;
 
-Но сейчас мы выполняем **только Этап 1 — Project Bootstrap**.
+# 1. Текущее состояние проекта
 
-Не переходи к следующим этапам раньше времени.
+Этап 1 — Project Bootstrap завершён.
 
----
-
-# Главная цель этапа
-
-Создать чистую и профессиональную основу проекта, на которой дальше будут реализованы:
-
-- authentication;
-- recipes;
-- queue;
-- parser;
-- frontend;
-- i18n.
-
-После завершения этого этапа у нас должен быть работающий пустой fullstack-проект:
-
-```text
-React frontend
-+
-NestJS backend
-+
-PostgreSQL
-+
-Redis
-```
-
-без бизнес-логики.
-
----
-
-# Важный контекст
-
-Проекта пока вообще нет.
-
-Мы начинаем с пустой директории.
-
-Я хочу писать код сама, поэтому:
-
-- не создавай весь проект за меня одним большим ответом;
-- веди меня маленькими шагами;
-- сначала объясняй действие;
-- потом показывай команду или небольшой код;
-- жди моего результата;
-- после проверки переходи дальше.
-
-Работаем так, как будто это коммерческий проект для серьёзного заказчика.
-
-Но не добавляем лишнюю enterprise-сложность.
-
-Главный принцип:
-
-```text
-простое корректное решение
->
-сложное решение "на будущее"
-```
-
----
-
-# Планируемый стек Dishly
-
-## Frontend
-
-- React;
-- TypeScript;
-- Vite;
-- React Router;
-- TanStack Query.
-
-Redux Toolkit сейчас НЕ добавляем.
-
-Он появится только если позже возникнет реальная необходимость в сложном global client state.
-
-Server state должен в будущем храниться через TanStack Query.
-
----
-
-## Backend
-
-- NestJS;
-- TypeScript;
-- PostgreSQL;
-- TypeORM;
-- ConfigModule.
-
-Позже будут:
-
-- BullMQ;
-- Redis;
-- JWT;
-- parser.
-
-Но бизнес-функциональность сейчас не реализуем.
-
----
-
-# Инфраструктура
-
-Используем Docker Compose для:
-
-```text
-PostgreSQL
-Redis
-```
-
-Frontend и backend пока запускаем локально через Node.js.
-
-Не нужно сейчас Dockerize frontend/backend.
-
----
-
-# Предполагаемая структура проекта
-
-Предпочтительно:
+Сейчас уже существует:
 
 ```text
 dishly/
 ├── apps/
+│   ├── backend/
 │   ├── frontend/
-│   └── backend/
-│
+│   └── codex/
 ├── AGENTS.md
 ├── README.md
 ├── docker-compose.yml
-├── .gitignore
-└── .env.example
+├── .env.example
+└── .gitignore
 ```
 
-Если считаешь другую структуру объективно лучше — сначала объясни причину.
+Backend уже содержит:
 
-Не добавляй Nx, Turborepo и другие monorepo frameworks.
+- NestJS;
+- TypeScript;
+- `@nestjs/config`;
+- `@nestjs/typeorm`;
+- TypeORM;
+- PostgreSQL driver `pg`;
+- глобальный `ValidationPipe`;
+- ConfigModule;
+- CORS;
+- `GET /health`;
+- подключение к PostgreSQL.
 
-Нам пока достаточно обычного monorepo.
-
----
-
-# Как со мной работать
-
-Каждый шаг оформляй так:
-
-## 1. Что сейчас делаем
-
-Очень коротко.
-
-## 2. Почему это нужно
-
-1–3 предложения.
-
-## 3. Где работать
-
-Укажи:
+Текущая TypeORM-конфигурация находится в:
 
 ```text
-директория
-файл
+apps/backend/src/app.module.ts
 ```
 
-## 4. Что сделать
+и использует:
 
-Дай конкретную команду или небольшой код.
-
-## 5. Что проверить
-
-Напиши точную команду проверки и какой результат я должна увидеть.
-
-После этого остановись и дождись моего результата.
-
-Не выдавай сразу следующий шаг.
-
----
-
-# Шаги Этапа 1
-
-Веди меня строго последовательно.
-
----
-
-## Step 1 — создать Git repository и структуру проекта
-
-Нужно:
-
-- создать директорию `dishly`;
-- инициализировать Git;
-- создать `apps`;
-- подготовить структуру для frontend/backend;
-- создать базовый `.gitignore`.
-
-Пока не генерировать React/NestJS.
-
-Проверить:
-
-```bash
-git status
+```ts
+autoLoadEntities: true,
+synchronize: false,
 ```
 
----
+`synchronize: false` необходимо сохранить.
 
-## Step 2 — создать backend
+PostgreSQL уже работает через Docker Compose.
 
-Создать NestJS приложение:
+Локально используется:
 
 ```text
-apps/backend
+host: localhost
+port: 5433
+database: dishly
 ```
 
-Не создавать сейчас:
+Frontend на этом этапе НЕ трогаем.
 
-- auth module;
-- recipes module;
-- users module;
+Redis на этом этапе НЕ трогаем.
+
+---
+
+# 2. Цель этапа
+
+На этом этапе нужно спроектировать и реализовать persistence-модель Dishly.
+
+Нужно получить:
+
+```text
+User
+  │
+  └── 1:N Recipe
+         │
+         ├── 1:N RecipeIngredient
+         │
+         └── 1:N RecipeStep
+```
+
+Также нужно настроить полноценную работу с TypeORM migrations.
+
+После завершения этапа:
+
+```text
+Entity
+↓
+TypeORM metadata
+↓
+Migration
+↓
+PostgreSQL schema
+```
+
+должны полностью соответствовать друг другу.
+
+---
+
+# 3. Главный принцип этапа
+
+Не реализовывать бизнес-логику.
+
+На этом этапе работаем только с:
+
+- Entity;
+- relations;
+- foreign keys;
+- indexes;
+- constraints;
+- enum;
+- migration infrastructure;
+- migrations;
+- минимальными Nest modules, необходимыми для регистрации Entity.
+
+НЕ делать:
+
+- authentication;
+- JWT;
+- register/login;
+- DTO;
+- controllers;
+- services с бизнес-логикой;
+- recipe CRUD;
+- repositories;
+- BullMQ;
+- queue;
 - parser;
-- queue.
-
-Оставить только стандартный bootstrap NestJS.
-
-Проверить:
-
-```bash
-npm run start:dev
-```
-
-и:
-
-```bash
-npm run build
-```
+- JSON-LD;
+- frontend;
+- i18n.
 
 ---
 
-## Step 3 — очистить NestJS demo-код
+# 4. Как со мной работать
 
-Разобрать стандартные:
+Не выполняй весь этап одним огромным изменением.
 
-```text
-main.ts
-app.module.ts
-app.controller.ts
-app.service.ts
-```
+Раздели его на логические блоки.
 
-Удалить или упростить demo-код, который нам не нужен.
+Для каждого блока сначала напиши:
 
-Но не усложнять структуру.
+## Что делаем
 
-Объясни мне назначение каждого базового NestJS файла.
+Коротко.
+
+## Почему
+
+Коротко объясни решение.
+
+## Что собираешься реализовать
+
+Без лишней теории.
+
+После этого выполняй изменения.
+
+После каждого крупного блока:
+
+- запускай подходящую проверку;
+- обновляй `apps/codex/AGENT_PROGRESS.md`;
+- кратко сообщай результат.
+
+Не создавай commit и не добавляй staget!
 
 ---
 
-## Step 4 — подключить ConfigModule
+# 5. План этапа
 
-Установить:
+Работай в следующем порядке.
+
+---
+
+# Step 1 — аудит текущей database-конфигурации
+
+Сначала ничего не меняй.
+
+Изучи:
 
 ```text
-@nestjs/config
+apps/backend/src/app.module.ts
+apps/backend/.env.example
+apps/backend/package.json
+apps/backend/tsconfig.json
+docker-compose.yml
 ```
 
-Настроить environment variables.
+Проверь:
 
-Конфигурация не должна быть захардкожена.
+- как NestJS сейчас подключается к PostgreSQL;
+- какая версия TypeORM установлена;
+- какой module system используется;
+- как должны запускаться TypeORM migrations в текущем проекте;
+- не потребуется ли отдельный `DataSource` для CLI;
+- как избежать конфликта между runtime TypeORM config и migration config.
 
-Подготовить:
+Не добавляй новую архитектуру без необходимости.
+
+Особенно не добавляй сторонний `naming strategy` package только ради snake_case.
+
+Названия таблиц и важных колонок можно задавать явно.
+
+---
+
+# Step 2 — настроить TypeORM migrations
+
+Создай migration infrastructure для backend.
+
+Предпочтительное направление:
 
 ```text
-.env
-.env.example
+apps/backend/src/
+├── database/
+│   ├── data-source.ts
+│   └── migrations/
 ```
 
-`.env` должен быть в `.gitignore`.
+Точное расположение можешь скорректировать, если есть техническая причина.
 
-`.env.example` должен попасть в Git.
+Нужен TypeORM `DataSource`, который сможет использовать TypeORM CLI.
 
-На этом этапе могут понадобиться переменные вроде:
+Он должен использовать те же PostgreSQL environment variables:
 
 ```text
-PORT
-
 DB_HOST
 DB_PORT
 DB_NAME
 DB_USER
 DB_PASSWORD
-
-REDIS_HOST
-REDIS_PORT
-
-FRONTEND_URL
 ```
 
-Но не добавлять переменные без реальной необходимости.
+Не хардкодить connection values.
+
+Если для загрузки `.env` напрямую в TypeORM CLI требуется `dotenv`, используй его явно как dependency, а не полагайся на случайную transitive dependency.
 
 ---
 
-## Step 5 — настроить global ValidationPipe
+## Требования к migration setup
 
-В `main.ts` подключить глобальный `ValidationPipe`.
-
-Разобрать со мной:
-
-```text
-whitelist
-transform
-forbidNonWhitelisted
-```
-
-И выбрать разумную конфигурацию.
-
-Сейчас DTO ещё может не быть — это нормально.
-
-Наша задача подготовить infrastructure foundation.
-
----
-
-## Step 6 — Docker Compose для PostgreSQL
-
-Создать:
-
-```text
-docker-compose.yml
-```
-
-Добавить PostgreSQL.
-
-Настроить через environment variables:
-
-```text
-database
-user
-password
-port
-```
-
-Добавить persistent volume.
-
-Не использовать production secrets.
-
-Запустить:
-
-```bash
-docker compose up -d
-```
-
-Проверить:
-
-```bash
-docker compose ps
-```
-
-PostgreSQL должен быть running/healthy.
-
----
-
-## Step 7 — TypeORM
-
-Установить:
-
-```text
-@nestjs/typeorm
-typeorm
-pg
-```
-
-Подключить TypeORM к PostgreSQL.
-
-Конфигурацию брать только из environment variables.
-
-Entity сейчас НЕ создавать.
-
-Наша задача:
-
-```text
-NestJS
-↓
-TypeORM
-↓
-PostgreSQL
-```
-
-должны успешно соединяться.
-
-Обязательно отдельно объясни разницу между:
-
-```text
-synchronize
-```
-
-и:
-
-```text
-migrations
-```
-
-Для проекта Dishly мы должны ориентироваться на migrations.
-
-Не строить production architecture на:
+Сохранить:
 
 ```ts
-synchronize: true;
+synchronize: false;
 ```
 
-Если временно используем его локально — объясни зачем и когда отключим.
+Не включать `synchronize: true` даже временно.
+
+Migration должна быть единственным способом создания бизнес-таблиц.
+
+Настрой удобные npm scripts для:
+
+```text
+migration:generate
+migration:run
+migration:revert
+migration:show
+```
+
+Точные команды выбери с учётом фактически установленной версии TypeORM и текущего NodeNext/ESM setup.
+
+После настройки обязательно реально проверь команды.
+
+Не добавляй migration framework поверх TypeORM.
 
 ---
 
-## Step 8 — добавить Redis
+# Step 3 — User Entity
 
-Добавить Redis в тот же:
+Создай доменную область пользователя.
 
-```text
-docker-compose.yml
-```
-
-Пока НЕ устанавливать BullMQ.
-
-Сейчас Redis просто должен запускаться как часть инфраструктуры.
-
-Проверить:
-
-```bash
-docker compose ps
-```
-
-Должны работать:
+Предпочтительная структура:
 
 ```text
-PostgreSQL
-Redis
+src/users/
+├── entities/
+│   └── user.entity.ts
+└── users.module.ts
+```
+
+`UsersModule` сейчас нужен только для корректной регистрации Entity через TypeORM.
+
+Не создавать:
+
+```text
+users.controller.ts
+users.service.ts
+DTO
+auth logic
 ```
 
 ---
 
-## Step 9 — создать frontend
+## Таблица users
 
-Создать:
+Таблица:
 
 ```text
-apps/frontend
+users
 ```
+
+Поля:
+
+```text
+id
+email
+password_hash
+name
+language
+created_at
+updated_at
+```
+
+### id
+
+Использовать обычный generated integer primary key.
+
+Не вводить UUID без необходимости.
+
+---
+
+### email
+
+```text
+NOT NULL
+UNIQUE
+```
+
+Максимальная разумная длина:
+
+```text
+320
+```
+
+---
+
+### passwordHash
+
+В TypeScript property:
+
+```ts
+passwordHash;
+```
+
+В PostgreSQL:
+
+```text
+password_hash
+```
+
+Поле:
+
+```text
+NOT NULL
+```
+
+Рекомендуется исключить его из обычных SELECT через возможности TypeORM, чтобы password hash случайно не возвращался вместе с User.
+
+На этапе Auth позже мы будем запрашивать его явно там, где это действительно необходимо.
+
+Никакого password hashing сейчас не реализовывать.
+
+---
+
+### name
+
+```text
+NOT NULL
+```
+
+Обычная строка разумной длины.
+
+---
+
+### language
+
+Пока:
+
+```text
+language
+```
+
+с дефолтным значением:
+
+```text
+en
+```
+
+Не нужно сейчас делать отдельную таблицу Languages.
+
+Не нужно создавать сложную локализационную модель.
+
+Можно хранить language code простой строкой.
+
+Начальные будущие значения:
+
+```text
+en
+ru
+```
+
+Но логика i18n будет реализована позже.
+
+---
+
+### timestamps
 
 Использовать:
 
 ```text
-Vite
-React
-TypeScript
+created_at
+updated_at
 ```
 
-Проверить:
-
-```bash
-npm run dev
-```
-
-и:
-
-```bash
-npm run build
-```
-
-Удалить стандартный Vite demo-контент.
-
-Не делать дизайн Dishly.
-
-Не создавать recipe cards.
+Хранить timezone-aware timestamps для PostgreSQL, если это нормально поддерживается текущим TypeORM setup.
 
 ---
 
-## Step 10 — React Router
+# Step 4 — RecipeStatus и Recipe Entity
 
-Установить React Router.
-
-Создать минимальную routing foundation.
-
-Можно использовать временные маршруты:
+Создай:
 
 ```text
-/
-/login
-/recipes
+src/recipes/
+├── entities/
+├── enums/
+└── recipes.module.ts
 ```
 
-Пока страницы могут быть простыми заглушками.
-
-Наша задача — только проверить routing.
+Пока без service/controller.
 
 ---
 
-## Step 11 — TanStack Query
+## RecipeStatus
 
-Установить TanStack Query.
+Создай enum:
 
-Настроить:
+```ts
+enum RecipeStatus {
+  PENDING = "pending",
+  PROCESSING = "processing",
+  COMPLETED = "completed",
+  FAILED = "failed",
+}
+```
+
+Recipe по умолчанию должен создаваться со статусом:
 
 ```text
-QueryClient
-QueryClientProvider
+pending
 ```
-
-Не писать реальные API queries.
-
-Объясни, почему TanStack Query должен использоваться для server state.
-
-Не добавлять Redux Toolkit.
 
 ---
 
-## Step 12 — frontend environment variables
+# Recipe Entity
 
-Настроить API URL через Vite env.
+Таблица:
+
+```text
+recipes
+```
+
+Поля:
+
+```text
+id
+
+title
+description
+
+source_url
+image_url
+
+servings
+prep_time_minutes
+cook_time_minutes
+
+status
+error_message
+
+user_id
+
+created_at
+updated_at
+```
+
+---
+
+## id
+
+Generated integer primary key.
+
+---
+
+## title
+
+```text
+nullable
+```
+
+Потому что Recipe будет создаваться до завершения parser-а.
+
+Разумная максимальная длина строки.
+
+---
+
+## description
+
+```text
+text
+nullable
+```
+
+---
+
+## sourceUrl
+
+TypeScript:
+
+```ts
+sourceUrl;
+```
+
+PostgreSQL:
+
+```text
+source_url
+```
+
+Поле:
+
+```text
+NOT NULL
+```
+
+Использовать `text`, потому что URL теоретически может быть длинным.
+
+Не добавлять UNIQUE constraint.
+
+Один и тот же URL теоретически может быть импортирован несколько раз.
+
+---
+
+## imageUrl
+
+```text
+image_url
+text
+nullable
+```
+
+---
+
+## servings
+
+```text
+integer
+nullable
+```
+
+---
+
+## prepTimeMinutes
+
+PostgreSQL:
+
+```text
+prep_time_minutes
+```
+
+```text
+integer
+nullable
+```
+
+---
+
+## cookTimeMinutes
+
+PostgreSQL:
+
+```text
+cook_time_minutes
+```
+
+```text
+integer
+nullable
+```
+
+---
+
+## status
+
+Использовать `RecipeStatus`.
+
+```text
+NOT NULL
+DEFAULT pending
+```
+
+---
+
+## errorMessage
+
+PostgreSQL:
+
+```text
+error_message
+```
+
+```text
+text
+nullable
+```
+
+---
+
+## userId
+
+Recipe должен всегда принадлежать User.
+
+TypeScript должен иметь удобный scalar foreign key:
+
+```ts
+userId: number;
+```
+
+и relation:
+
+```ts
+user: User;
+```
+
+Оба должны использовать одну колонку:
+
+```text
+user_id
+```
+
+Связь:
+
+```text
+User 1:N Recipe
+```
+
+Foreign key:
+
+```text
+recipes.user_id
+→ users.id
+```
+
+При удалении User:
+
+```text
+ON DELETE CASCADE
+```
+
+потому что в текущей продуктовой модели Recipes принадлежат конкретному User.
+
+Не использовать ORM `cascade: true` просто ради автоматического save.
+
+---
+
+## Index
+
+Добавить индекс на:
+
+```text
+recipes.user_id
+```
+
+Потому что основной query pattern приложения:
+
+```text
+получить Recipes конкретного User
+```
+
+Не добавлять десятки speculative indexes.
+
+---
+
+# Step 5 — RecipeIngredient Entity
+
+Создай:
+
+```text
+recipe-ingredient.entity.ts
+```
+
+Таблица:
+
+```text
+recipe_ingredients
+```
+
+Поля:
+
+```text
+id
+raw_text
+name
+quantity
+unit
+position
+recipe_id
+```
+
+---
+
+## rawText
+
+TypeScript:
+
+```ts
+rawText;
+```
+
+DB:
+
+```text
+raw_text
+```
+
+```text
+text
+NOT NULL
+```
+
+Это оригинальная строка ингредиента.
 
 Например:
 
 ```text
-VITE_API_URL
+½ - 1 tsp chilli flakes
 ```
 
-Frontend не должен содержать разбросанные:
-
-```text
-http://localhost:3000
-```
-
-в разных компонентах.
+Её нельзя терять даже если структурированные поля определить не удалось.
 
 ---
 
-## Step 13 — простой backend health endpoint
-
-Добавить простой:
+## name
 
 ```text
-GET /health
+nullable
 ```
 
-Например response:
+Разумная строковая длина.
 
-```json
-{
-  "status": "ok"
-}
-```
+---
 
-Не делать сейчас сложную health-check infrastructure.
-
-Цель — проверить:
+## quantity
 
 ```text
-browser/frontend
-↓
-NestJS backend
+nullable
+```
+
+Количество должно поддерживать дробные значения:
+
+```text
+0.5
+1.5
+2.25
+```
+
+Выбери PostgreSQL/TypeORM тип, который нормально отображается в JavaScript `number`.
+
+Не создавай сложный decimal transformer без реальной необходимости.
+
+Для количества ингредиентов достаточно обычного floating-point numeric representation.
+
+---
+
+## unit
+
+```text
+nullable
+```
+
+Разумная короткая строка.
+
+Например:
+
+```text
+g
+kg
+ml
+tbsp
+tsp
 ```
 
 ---
 
-## Step 14 — CORS
+## position
 
-Настроить CORS в NestJS.
+```text
+integer
+NOT NULL
+```
 
-Frontend origin получать из env.
+Порядок ингредиентов должен храниться явно.
 
-Не использовать без необходимости:
+Нельзя рассчитывать на порядок primary key.
+
+---
+
+## recipeId
+
+TypeScript:
 
 ```ts
-origin: "*";
+recipeId: number;
 ```
 
-Для local development должен быть разрешён конкретный frontend URL.
+Relation:
+
+```ts
+recipe: Recipe;
+```
+
+Оба используют:
+
+```text
+recipe_id
+```
+
+Foreign key:
+
+```text
+recipe_ingredients.recipe_id
+→ recipes.id
+ON DELETE CASCADE
+```
 
 ---
 
-## Step 15 — проверить связь frontend/backend
+## Unique constraint
 
-Сделать максимально простой временный вызов `/health`.
-
-Не использовать:
+Обязательно:
 
 ```text
-useEffect + fetch
+UNIQUE(recipe_id, position)
 ```
 
-если мы уже подключили TanStack Query.
+У одного Recipe не должно существовать двух ингредиентов с одинаковой позицией.
 
-Можно создать временный query только для проверки связи.
+Отдельный index только на `recipe_id` не нужен, если composite unique index уже эффективно начинается с `recipe_id`.
 
-Если этот код после проверки не нужен архитектуре — обсудить, удалить ли его.
+Не создавать дублирующие индексы.
 
 ---
 
-## Step 16 — README
+# Step 6 — RecipeStep Entity
 
-Создать базовый:
-
-```text
-README.md
-```
-
-README должен позволить другому разработчику выполнить:
+Создай:
 
 ```text
-clone
-↓
-install dependencies
-↓
-создать .env
-↓
-docker compose up
-↓
-запустить backend
-↓
-запустить frontend
+recipe-step.entity.ts
 ```
 
-README должен содержать:
+Таблица:
 
-- краткое описание Dishly;
-- stack;
-- prerequisites;
-- installation;
-- environment setup;
-- Docker commands;
-- frontend start;
-- backend start;
-- build commands.
+```text
+recipe_steps
+```
 
-Не писать огромную документацию.
+Поля:
+
+```text
+id
+text
+group_name
+duration_minutes
+image_url
+position
+recipe_id
+```
 
 ---
 
-## Step 17 — финальная проверка
+## text
+
+```text
+text
+NOT NULL
+```
+
+---
+
+## group
+
+В TypeScript property оставить:
+
+```ts
+group: string | null;
+```
+
+В PostgreSQL лучше использовать понятное имя:
+
+```text
+group_name
+```
+
+чтобы не использовать потенциально неоднозначное SQL-имя `group`.
+
+Поле nullable.
+
+Пример:
+
+```text
+For the chicken
+For the sauce
+```
+
+Если группировки нет:
+
+```text
+null
+```
+
+---
+
+## durationMinutes
+
+PostgreSQL:
+
+```text
+duration_minutes
+```
+
+```text
+integer
+nullable
+```
+
+---
+
+## imageUrl
+
+PostgreSQL:
+
+```text
+image_url
+```
+
+```text
+text
+nullable
+```
+
+---
+
+## position
+
+```text
+integer
+NOT NULL
+```
+
+---
+
+## recipeId
+
+TypeScript:
+
+```ts
+recipeId: number;
+```
+
+Relation:
+
+```ts
+recipe: Recipe;
+```
+
+DB:
+
+```text
+recipe_id
+```
+
+Foreign key:
+
+```text
+recipe_steps.recipe_id
+→ recipes.id
+ON DELETE CASCADE
+```
+
+---
+
+## Unique constraint
+
+Добавить:
+
+```text
+UNIQUE(recipe_id, position)
+```
+
+---
+
+# Step 7 — обратные relations
+
+Entity должны иметь двусторонние relations.
+
+Концептуально:
+
+```text
+User
+└── recipes: Recipe[]
+
+Recipe
+├── user: User
+├── ingredients: RecipeIngredient[]
+└── steps: RecipeStep[]
+
+RecipeIngredient
+└── recipe: Recipe
+
+RecipeStep
+└── recipe: Recipe
+```
+
+Не включать:
+
+```ts
+cascade: true;
+```
+
+на всех `OneToMany`.
+
+Сохранение связанных Entity позже должно быть осознанной частью service/business logic.
+
+Удаление children обеспечивается через database:
+
+```text
+ON DELETE CASCADE
+```
+
+на owning-side foreign keys.
+
+---
+
+# Step 8 — регистрация Entity
+
+Текущий backend использует:
+
+```ts
+autoLoadEntities: true;
+```
+
+Поэтому зарегистрируй Entity через соответствующие Nest modules.
+
+Например:
+
+```text
+UsersModule
+→ TypeOrmModule.forFeature([User])
+
+RecipesModule
+→ TypeOrmModule.forFeature([
+     Recipe,
+     RecipeIngredient,
+     RecipeStep,
+   ])
+```
+
+После этого подключи эти modules в `AppModule`.
+
+Не создавать services/controllers только для того, чтобы module выглядел заполненным.
+
+---
+
+# Step 9 — Initial migration
+
+После того как Entity готовы:
+
+1. убедись, что PostgreSQL запущен;
+2. проверь, что dev database находится в ожидаемом состоянии;
+3. не удаляй существующие данные без моего разрешения;
+4. сгенерируй initial migration на основе Entity.
+
+Имя migration должно быть понятным, например:
+
+```text
+CreateInitialSchema
+```
+
+или:
+
+```text
+InitialDatabaseSchema
+```
+
+После генерации обязательно открой migration и вручную проверь SQL.
+
+Нельзя просто довериться TypeORM generator.
+
+---
+
+# 10. Что должна создавать migration
+
+Ожидаемые таблицы:
+
+```text
+users
+recipes
+recipe_ingredients
+recipe_steps
+migrations
+```
+
+`migrations` — служебная таблица TypeORM после выполнения migrations.
+
+---
+
+## users
+
+Ожидается:
+
+```text
+PK id
+UNIQUE email
+password_hash
+name
+language
+created_at
+updated_at
+```
+
+---
+
+## recipes
+
+Ожидается:
+
+```text
+PK id
+
+nullable title
+nullable description
+
+source_url NOT NULL
+image_url nullable
+
+servings nullable
+prep_time_minutes nullable
+cook_time_minutes nullable
+
+status NOT NULL
+error_message nullable
+
+user_id NOT NULL
+
+created_at
+updated_at
+
+FK user_id → users.id
+ON DELETE CASCADE
+```
+
+Плюс индекс по:
+
+```text
+user_id
+```
+
+---
+
+## recipe_ingredients
+
+Ожидается:
+
+```text
+PK id
+raw_text
+name
+quantity
+unit
+position
+recipe_id
+
+FK recipe_id → recipes.id
+ON DELETE CASCADE
+
+UNIQUE(recipe_id, position)
+```
+
+---
+
+## recipe_steps
+
+Ожидается:
+
+```text
+PK id
+text
+group_name
+duration_minutes
+image_url
+position
+recipe_id
+
+FK recipe_id → recipes.id
+ON DELETE CASCADE
+
+UNIQUE(recipe_id, position)
+```
+
+---
+
+# Step 11 — проверить migration lifecycle
+
+Нужно доказать, что migration infrastructure реально работает.
 
 Проверить:
 
-### Backend
+```text
+migration:show
+migration:run
+```
+
+После `migration:run` проверить PostgreSQL schema.
+
+Не ограничиваться сообщением CLI:
+
+```text
+Migration executed successfully
+```
+
+Посмотреть реальные таблицы, foreign keys и constraints через PostgreSQL.
+
+После этого, если это безопасно для текущей локальной dev database:
+
+```text
+migration:revert
+```
+
+Проверить, что migration откатилась корректно.
+
+Затем снова:
+
+```text
+migration:run
+```
+
+чтобы финальное состояние БД снова соответствовало Entity.
+
+Не оставлять базу в reverted состоянии.
+
+---
+
+# Step 12 — объяснить SQL-модель
+
+После создания migration коротко объясни мне, какой SQL concept стоит за каждым TypeORM relation.
+
+Особенно:
+
+```text
+@ManyToOne
+@OneToMany
+@JoinColumn
+@Unique
+@Index
+onDelete: 'CASCADE'
+```
+
+Мне нужно понимать не только TypeORM decorators, но и итоговую PostgreSQL-модель.
+
+Не делай длинную лекцию.
+
+Покажи связь:
+
+```text
+TypeORM
+→ какой FK/index/constraint появляется в PostgreSQL
+```
+
+---
+
+# 13. На что обратить особое внимание
+
+## Entity != DTO
+
+На этом этапе DTO вообще не нужны.
+
+Не создавай DTO только потому, что позже будет API.
+
+---
+
+## Entity != ParsedRecipe
+
+Database Entity и результат parser-а — разные модели.
+
+Не добавлять parser-specific типы в Entity.
+
+Например:
+
+```text
+Recipe
+```
+
+может содержать:
+
+```text
+id
+status
+userId
+errorMessage
+createdAt
+```
+
+а parser позже будет возвращать отдельный:
+
+```text
+ParsedRecipe
+```
+
+без database-specific полей.
+
+Сам `ParsedRecipe` пока не требуется реализовывать на этом этапе.
+
+---
+
+## Не использовать eager relations
+
+Не добавлять:
+
+```ts
+eager: true;
+```
+
+без реальной необходимости.
+
+Позже service сам определит, какие relations нужны конкретному query.
+
+---
+
+## Не использовать ORM cascade save без причины
+
+Не ставить:
+
+```ts
+cascade: true;
+```
+
+просто чтобы TypeORM автоматически сохранял всё дерево.
+
+Мы хотим явно понимать операции записи.
+
+---
+
+## Не использовать synchronize
+
+Оставить:
+
+```ts
+synchronize: false;
+```
+
+---
+
+## Не добавлять timestamps всем Entity без необходимости
+
+`createdAt` / `updatedAt` нужны для:
+
+```text
+User
+Recipe
+```
+
+Для:
+
+```text
+RecipeIngredient
+RecipeStep
+```
+
+пока они не нужны.
+
+---
+
+# 14. Что НЕ входит в Этап 2
+
+Категорически не реализовывать сейчас:
+
+```text
+AuthService
+AuthController
+JWT
+bcrypt/argon
+RegisterDto
+LoginDto
+
+RecipesController
+RecipesService
+Recipe CRUD
+
+BullMQ
+queue
+worker
+
+HTML fetch
+JSON-LD
+Good Food parser
+
+frontend changes
+i18next
+profile UI
+shopping list
+AI
+```
+
+Следующий этап будет:
+
+```text
+Этап 3 — Backend Authentication
+```
+
+Но к нему не переходить автоматически.
+
+---
+
+# 15. Проверки перед завершением
+
+Обязательно выполнить:
 
 ```bash
 npm run build
-```
-
-Если есть lint:
-
-```bash
 npm run lint
 ```
 
-### Frontend
+из:
 
-```bash
-npm run build
+```text
+apps/backend
 ```
 
-Если есть lint:
+Проверить TypeORM migration commands.
 
-```bash
-npm run lint
-```
-
-### Infrastructure
+Проверить:
 
 ```bash
 docker compose ps
 ```
 
-### Git
+из root проекта.
+
+PostgreSQL должен быть healthy.
+
+Проверить migration status.
+
+Проверить database schema.
+
+Проверить:
 
 ```bash
 git status
 git diff
 ```
+
+Не создавать commit без моего запроса.
+
+---
+
+# 16. Definition of Done
+
+Этап 2 считается готовым только если:
+
+```text
+[ ] migration infrastructure настроена
+
+[ ] synchronize остаётся false
+
+[ ] TypeORM DataSource для CLI работает
+
+[ ] migration npm scripts работают
+
+[ ] User Entity создан
+
+[ ] Recipe Entity создан
+
+[ ] RecipeIngredient Entity создан
+
+[ ] RecipeStep Entity создан
+
+[ ] RecipeStatus enum создан
+
+[ ] UsersModule регистрирует User
+
+[ ] RecipesModule регистрирует recipe Entity
+
+[ ] AppModule подключает новые modules
+
+[ ] User 1:N Recipe настроено
+
+[ ] Recipe 1:N RecipeIngredient настроено
+
+[ ] Recipe 1:N RecipeStep настроено
+
+[ ] explicit userId присутствует в Recipe
+
+[ ] explicit recipeId присутствует в Ingredient и Step
+
+[ ] ON DELETE CASCADE настроен корректно
+
+[ ] UNIQUE(recipe_id, position) существует для ingredients
+
+[ ] UNIQUE(recipe_id, position) существует для steps
+
+[ ] index recipes.user_id существует
+
+[ ] initial migration создана
+
+[ ] migration SQL вручную проверен
+
+[ ] migration:run работает
+
+[ ] migration:show работает
+
+[ ] migration:revert проверен
+
+[ ] migration повторно применена после revert
+
+[ ] реальные таблицы/relations/constraints проверены в PostgreSQL
+
+[ ] backend build проходит
+
+[ ] backend lint проходит
+
+[ ] frontend не изменялся
+
+[ ] auth не реализовывался
+
+[ ] parser не реализовывался
+
+[ ] queue не реализовывалась
+```
+
+---
+
+# 17. Финальный review
+
+После завершения не переходи к Auth.
+
+Сначала дай отчёт:
+
+## Что изменено
+
+Короткий список файлов и решений.
+
+## Database schema
+
+Покажи итоговую схему:
+
+```text
+User
+→ Recipe
+→ Ingredient / Step
+```
+
+## Migration
+
+Укажи:
+
+- имя migration;
+- run result;
+- revert result;
+- repeat run result.
+
+## MUST FIX
+
+Если есть проблемы, которые блокируют следующий этап.
+
+## SHOULD IMPROVE
+
+Не блокирующие улучшения.
+
+## OPTIONAL
+
+То, что можно оставить на будущее.
+
+## VERDICT
+
+Явно:
+
+```text
+Этап 2 готов к переходу на Этап 3
+```
+
+или:
+
+```text
+Этап 2 пока не готов
+```
+
+с причиной.
+
+Также обнови:
+
+```text
+apps/codex/AGENT_PROGRESS.md
+```
+
+так, чтобы другой Codex session мог продолжить работу без потери контекста.
+
+---
+
+# Начало
+
+Сейчас начни с:
+
+```text
+Step 1 — аудит текущей database-конфигурации
+```
+
+Сначала покажи мне краткий результат аудита и предложенную структуру файлов.
+
+Не начинай создание Entity до того, как станет понятно, как именно в текущем NodeNext + TypeORM setup будут работать migrations.
