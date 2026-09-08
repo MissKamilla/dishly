@@ -21,10 +21,10 @@
 Продолжать нужно с:
 
 ```text
-Этап 2 Step 3 - User Entity
+Этап 2 завершен - можно делать commit entities/schema
 ```
 
-Причина: Step 2 - TypeORM migrations infrastructure завершен.
+Причина: финальные проверки этапа 2 пройдены.
 
 Ключевые выводы аудита:
 
@@ -41,7 +41,19 @@
   - `apps/backend/src/database/typeorm.config.ts`;
   - `apps/backend/src/database/data-source.ts`;
   - `apps/backend/src/database/migrations/.gitkeep`;
+  - `apps/backend/src/database/migrations/1788879733493-CreateInitialSchema.ts`;
   - npm scripts `migration:generate`, `migration:run`, `migration:revert`, `migration:show`.
+- User persistence model уже создан:
+  - `apps/backend/src/users/entities/user.entity.ts`;
+  - `apps/backend/src/users/users.module.ts`;
+  - `UsersModule` подключен в `AppModule`.
+- Recipe persistence model уже создан:
+  - `apps/backend/src/recipes/enums/recipe-status.enum.ts`;
+  - `apps/backend/src/recipes/entities/recipe.entity.ts`;
+  - `apps/backend/src/recipes/entities/recipe-ingredient.entity.ts`;
+  - `apps/backend/src/recipes/entities/recipe-step.entity.ts`;
+  - `apps/backend/src/recipes/recipes.module.ts`;
+  - `RecipesModule` подключен в `AppModule`.
 
 ## Чеклист Этапа 1
 
@@ -67,15 +79,15 @@
 
 - [x] Step 1 - аудит текущей database-конфигурации.
 - [x] Step 2 - настроить TypeORM migrations.
-- [ ] Step 3 - User Entity.
-- [ ] Step 4 - RecipeStatus и Recipe Entity.
-- [ ] Step 5 - RecipeIngredient Entity.
-- [ ] Step 6 - RecipeStep Entity.
-- [ ] Step 7 - обратные relations.
-- [ ] Step 8 - регистрация Entity.
-- [ ] Step 9 - Initial migration.
-- [ ] Step 11 - проверить migration lifecycle.
-- [ ] Step 12 - объяснить SQL-модель.
+- [x] Step 3 - User Entity.
+- [x] Step 4 - RecipeStatus и Recipe Entity.
+- [x] Step 5 - RecipeIngredient Entity.
+- [x] Step 6 - RecipeStep Entity.
+- [x] Step 7 - обратные relations.
+- [x] Step 8 - регистрация Entity.
+- [x] Step 9 - Initial migration.
+- [x] Step 11 - проверить migration lifecycle.
+- [x] Step 12 - объяснить SQL-модель.
 
 ## Уже сделано
 
@@ -193,6 +205,131 @@ app.useGlobalPipes(
   - создана папка `src/database/migrations`;
   - `npm run build` из `apps/backend` прошел успешно;
   - пользователь проверил `migration:generate -- --dr`, `npm run lint`, `docker compose ps`, `git status`, `git diff` - все работает.
+- Этап 2 Step 3 завершен:
+  - создан `User` entity с таблицей `users`;
+  - поля: `id`, `email`, `password_hash`, `name`, `language`, `created_at`, `updated_at`;
+  - `passwordHash` хранится в колонке `password_hash` и исключен из обычных SELECT через `select: false`;
+  - `email` имеет unique constraint `UQ_users_email`;
+  - `language` имеет default `en`;
+  - timestamps используют PostgreSQL `TIMESTAMP WITH TIME ZONE`;
+  - создан `UsersModule` с `TypeOrmModule.forFeature([User])`;
+  - `UsersModule` подключен в `AppModule`;
+  - `npm run build` из `apps/backend` прошел успешно;
+  - `npm run lint` из `apps/backend` прошел успешно;
+  - `migration:generate -- src/database/migrations/CheckUserEntity --dr` прошел успешно и показал ожидаемый SQL без создания файла.
+- Этап 2 Step 4 завершен:
+  - создан enum `RecipeStatus` со значениями `pending`, `processing`, `completed`, `failed`;
+  - создан `Recipe` entity с таблицей `recipes`;
+  - поля: `id`, `title`, `description`, `source_url`, `image_url`, `servings`, `prep_time_minutes`, `cook_time_minutes`, `status`, `error_message`, `user_id`, `created_at`, `updated_at`;
+  - `status` использует PostgreSQL enum `recipe_status` и default `pending`;
+  - `userId` хранится в колонке `user_id`;
+  - `user` relation настроен через `ManyToOne` и `JoinColumn({ name: 'user_id' })`;
+  - FK `recipes.user_id -> users.id` настроен с `ON DELETE CASCADE`;
+  - добавлен индекс `IDX_recipes_user_id`;
+  - создан `RecipesModule` с `TypeOrmModule.forFeature([Recipe])`;
+  - `RecipesModule` подключен в `AppModule`;
+  - не создавались service/controller/DTO/repository;
+  - `npm run build` из `apps/backend` прошел успешно;
+  - `npm run lint` из `apps/backend` прошел успешно;
+  - `migration:generate -- src/database/migrations/CheckRecipeEntity --dr` прошел успешно и показал ожидаемый SQL без создания файла.
+- Этап 2 Step 5 завершен:
+  - создан `RecipeIngredient` entity с таблицей `recipe_ingredients`;
+  - поля: `id`, `raw_text`, `name`, `quantity`, `unit`, `position`, `recipe_id`;
+  - `rawText` хранится в колонке `raw_text` как обязательный `text`;
+  - `name` nullable `varchar(255)`;
+  - `quantity` nullable `double precision`, чтобы поддерживать дробные значения как JS `number`;
+  - `unit` nullable `varchar(32)`;
+  - `position` обязательный `integer`;
+  - `recipeId` хранится в колонке `recipe_id`;
+  - `recipe` relation настроен через `ManyToOne` и `JoinColumn({ name: 'recipe_id' })`;
+  - FK `recipe_ingredients.recipe_id -> recipes.id` настроен с `ON DELETE CASCADE`;
+  - добавлен unique constraint `UQ_recipe_ingredients_recipe_id_position` на `(recipe_id, position)`;
+  - отдельный индекс на `recipe_id` не добавлялся, чтобы не дублировать composite unique index;
+  - не создавались service/controller/DTO/repository;
+  - `RecipesModule` пока не обновлялся для `RecipeIngredient`; регистрация всех recipe entities будет на Step 8;
+  - `npm run build` из `apps/backend` прошел успешно;
+  - `npm run lint` из `apps/backend` прошел успешно;
+  - `migration:generate -- src/database/migrations/CheckRecipeIngredientEntity --dr` прошел успешно и показал ожидаемый SQL без создания файла.
+- Этап 2 Step 6 завершен:
+  - создан `RecipeStep` entity с таблицей `recipe_steps`;
+  - поля: `id`, `text`, `group_name`, `duration_minutes`, `image_url`, `position`, `recipe_id`;
+  - `text` обязательный `text`;
+  - `group` хранится в колонке `group_name` как nullable `varchar(255)`;
+  - `durationMinutes` хранится в колонке `duration_minutes` как nullable `integer`;
+  - `imageUrl` хранится в колонке `image_url` как nullable `text`;
+  - `position` обязательный `integer`;
+  - `recipeId` хранится в колонке `recipe_id`;
+  - `recipe` relation настроен через `ManyToOne` и `JoinColumn({ name: 'recipe_id' })`;
+  - FK `recipe_steps.recipe_id -> recipes.id` настроен с `ON DELETE CASCADE`;
+  - добавлен unique constraint `UQ_recipe_steps_recipe_id_position` на `(recipe_id, position)`;
+  - не создавались service/controller/DTO/repository;
+  - `RecipesModule` пока не обновлялся для `RecipeIngredient`/`RecipeStep`; регистрация всех recipe entities будет на Step 8;
+  - `npm run build` из `apps/backend` прошел успешно;
+  - `npm run lint` из `apps/backend` прошел успешно;
+  - `migration:generate -- src/database/migrations/CheckRecipeStepEntity --dr` прошел успешно и показал ожидаемый SQL без создания файла.
+- Этап 2 Step 7 завершен:
+  - в `User` добавлен обратный relation `recipes: Recipe[]`;
+  - в `Recipe` добавлены обратные relations `ingredients: RecipeIngredient[]` и `steps: RecipeStep[]`;
+  - `cascade: true` не добавлялся;
+  - eager loading не добавлялся;
+  - owning-side FK остаются на `Recipe.user`, `RecipeIngredient.recipe`, `RecipeStep.recipe`;
+  - `OneToMany` не создает новые database columns, а только описывает обратную навигацию для TypeORM;
+  - `npm run build` из `apps/backend` прошел успешно;
+  - `npm run lint` из `apps/backend` прошел успешно;
+  - `migration:generate -- src/database/migrations/CheckReverseRelations --dr` прошел успешно и не показал неожиданных колонок.
+- Этап 2 Step 8 завершен:
+  - `UsersModule` уже регистрирует `User` через `TypeOrmModule.forFeature([User])`;
+  - `RecipesModule` обновлен и регистрирует `Recipe`, `RecipeIngredient`, `RecipeStep`;
+  - `AppModule` уже подключает `UsersModule` и `RecipesModule`;
+  - service/controller/DTO/repository не создавались;
+  - `npm run build` из `apps/backend` прошел успешно;
+  - `npm run lint` из `apps/backend` прошел успешно;
+  - `migration:generate -- src/database/migrations/CheckEntityRegistration --dr` прошел успешно и SQL остался ожидаемым.
+- Этап 2 Step 9 завершен:
+  - проверено, что Docker container `dishly-postgres-1` healthy;
+  - проверено, что dev database содержит только служебную таблицу `migrations`, бизнес-таблиц не было;
+  - `migration:show` показал отсутствие примененных migrations до генерации;
+  - создана initial migration `1788879733493-CreateInitialSchema.ts`;
+  - migration вручную проверена: создает `users`, `recipe_status`, `recipes`, `recipe_ingredients`, `recipe_steps`;
+  - migration создает `UQ_users_email`, `IDX_recipes_user_id`, `UQ_recipe_ingredients_recipe_id_position`, `UQ_recipe_steps_recipe_id_position`;
+  - migration создает FK `recipes.user_id -> users.id ON DELETE CASCADE`;
+  - migration создает FK `recipe_ingredients.recipe_id -> recipes.id ON DELETE CASCADE`;
+  - migration создает FK `recipe_steps.recipe_id -> recipes.id ON DELETE CASCADE`;
+  - порядок создания `recipe_steps` до `recipes` безопасен, потому что FK добавляется отдельным `ALTER TABLE` после создания обеих таблиц;
+  - `npm run build` из `apps/backend` прошел успешно;
+  - `npm run lint` из `apps/backend` прошел успешно и отформатировал migration;
+  - `migration:show` после генерации показывает `[ ] CreateInitialSchema1788879733493`.
+- Этап 2 Step 11 завершен:
+  - пользователь вручную запустил `npm run migration:run`;
+  - через PostgreSQL проверено, что созданы таблицы `users`, `recipes`, `recipe_ingredients`, `recipe_steps`, `migrations`;
+  - через таблицу `migrations` проверено, что записана migration `CreateInitialSchema1788879733493`;
+  - через `\d users`, `\d recipes`, `\d recipe_ingredients`, `\d recipe_steps` проверены реальные колонки, nullable/defaults, PK, FK и unique constraints;
+  - через `pg_enum` проверены значения enum `recipe_status`: `pending`, `processing`, `completed`, `failed`;
+  - через `pg_constraint` проверено, что FK используют `ON DELETE CASCADE`;
+  - `npm run migration:revert` прошел успешно;
+  - после revert проверено, что осталась только таблица `migrations`, а запись о migration удалена;
+  - `npm run migration:run` повторно применил migration;
+  - финальный `migration:show` показывает `[X] CreateInitialSchema1788879733493`;
+  - через `pg_indexes` проверены `IDX_recipes_user_id`, `UQ_users_email`, `UQ_recipe_ingredients_recipe_id_position`, `UQ_recipe_steps_recipe_id_position`;
+  - `npm run build` из `apps/backend` прошел успешно;
+  - `npm run lint` из `apps/backend` прошел успешно.
+- Этап 2 Step 12 завершен:
+  - разработчику объяснено соответствие TypeORM decorators и PostgreSQL concepts;
+  - `ManyToOne` / `JoinColumn` соответствуют FK column на owning-side;
+  - `OneToMany` соответствует обратной TypeScript-навигации и не создает колонку в PostgreSQL;
+  - `Unique` соответствует unique constraint / unique index;
+  - `Index` соответствует обычному database index;
+  - `onDelete: 'CASCADE'` соответствует FK behavior `ON DELETE CASCADE`;
+  - объяснено, почему database cascade deletion отличается от ORM `cascade: true`.
+- Финальные проверки Этапа 2 завершены:
+  - `npm run build` из `apps/backend` прошел успешно;
+  - `npm run lint` из `apps/backend` прошел успешно;
+  - `npm run migration:show` показывает `[X] CreateInitialSchema1788879733493`;
+  - `docker ps` показывает `dishly-postgres-1` и `dishly-redis-1` healthy;
+  - через PostgreSQL проверены таблицы `migrations`, `users`, `recipes`, `recipe_ingredients`, `recipe_steps`;
+  - через PostgreSQL проверены FK/unique constraints и enum `recipe_status`;
+  - frontend не изменялся;
+  - auth/parser/queue/business logic не реализовывались.
 
 ## Текущие локальные ignored файлы
 
@@ -215,6 +352,8 @@ app.useGlobalPipes(
 - Runtime TypeORM config и CLI DataSource используют общий helper без Nest-зависимостей.
 - Текущий `typeorm@1.1.1` выглядит новым ESM-aware пакетом с `DataSource` и CLI wrappers `typeorm-ts-node-commonjs` / `typeorm-ts-node-esm`; для текущего проекта выбран и проверен `typeorm-ts-node-commonjs`.
 - По договоренности с разработчиком: если нужно что-то установить или запустить, сначала дать команду и объяснить зачем; разработчик выполнит команду самостоятельно.
+- Следить за одинаковым стилем и порядком во всех файлах.
+- Commit `4afcc03 chore: configure TypeORM migrations` уже содержит migration infrastructure Step 2; следующий commit должен покрыть entities + initial migration.
 
 ## Правило ведения этого файла дальше
 

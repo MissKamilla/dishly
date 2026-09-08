@@ -3,6 +3,8 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { createRuntimeDatabaseOptions } from './database/typeorm.config';
 import { HealthController } from './health.controller';
+import { RecipesModule } from './recipes/recipes.module';
+import { UsersModule } from './users/users.module';
 
 @Module({
   imports: [
@@ -16,6 +18,8 @@ import { HealthController } from './health.controller';
           configService.getOrThrow<string>(name),
         ),
     }),
+    RecipesModule,
+    UsersModule,
   ],
   controllers: [HealthController],
 })
