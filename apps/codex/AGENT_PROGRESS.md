@@ -21,10 +21,10 @@
 Продолжать нужно с:
 
 ```text
-Этап 3 Step 3 завершен - продолжать с Step 4 UsersService
+Этап 3 Step 5 завершен - продолжать с Step 6 RegisterDto
 ```
 
-Причина: auth environment variables описаны, `.env.example` содержит восстановимый dev config, приложение теперь валидирует JWT env на старте.
+Причина: email normalization добавлена в `UsersService` для поиска и создания пользователей.
 
 Ключевые выводы аудита:
 
@@ -63,7 +63,7 @@
   - `@types/cookie-parser@1.4.10`.
 - `apps/backend/src/main.ts` уже содержит global `ValidationPipe` с `whitelist`, `transform`, `forbidNonWhitelisted`.
 - CORS уже включен с origin из `FRONTEND_URL`; для cookie-auth на одном из следующих шагов нужно добавить `credentials: true`.
-- `UsersModule` пока содержит только `TypeOrmModule.forFeature([User])`; `UsersService` еще не создан.
+- `UsersModule` содержит `TypeOrmModule.forFeature([User])`, provides/exports `UsersService`.
 - `AuthModule`, `AuthController`, `AuthService`, DTO, guard, decorators и auth types еще не созданы.
 - Step 3 Environment configuration завершен:
   - `apps/backend/.env.example` содержит `NODE_ENV`, `JWT_SECRET`, `JWT_EXPIRES_IN_SECONDS`;
@@ -73,6 +73,16 @@
   - `ConfigModule.forRoot` подключает `validateEnvironment`;
   - при пустом `JWT_SECRET` приложение падает на старте;
   - `JWT_EXPIRES_IN_SECONDS` должен быть положительным целым числом.
+- Step 4 UsersService завершен:
+  - добавлен `apps/backend/src/users/users.service.ts`;
+  - `UsersService` использует стандартный TypeORM `Repository<User>` через `@InjectRepository(User)`;
+  - методы: `findById`, `findByEmail`, `findByEmailWithPassword`, `create`;
+  - `findByEmailWithPassword` явно добавляет `user.passwordHash` через query builder, потому что `passwordHash` имеет `select: false`;
+  - `create` после сохранения перечитывает пользователя обычным query и возвращает public `User` без `passwordHash`;
+  - `UsersModule` теперь provides/exports `UsersService`.
+- Step 5 Email normalization завершен:
+  - `UsersService.findByEmail`, `findByEmailWithPassword` и `create` нормализуют email через `trim().toLowerCase()`;
+  - password не нормализуется и не меняется.
 
 ## Чеклист Этапа 1
 
@@ -113,8 +123,9 @@
 - [x] Step 1 - Audit перед Auth.
 - [x] Step 2 - Dependencies.
 - [x] Step 3 - Environment configuration.
-- [ ] Step 4 - UsersService.
-- [ ] Step 5+ - Auth module/service/controller/guard/decorators/tests/manual verification по `CODEX_TASK.md`.
+- [x] Step 4 - UsersService.
+- [x] Step 5 - Email normalization.
+- [ ] Step 6+ - DTO/auth module/service/controller/guard/decorators/tests/manual verification по `CODEX_TASK.md`.
 
 ## Уже сделано
 
