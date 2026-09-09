@@ -21,10 +21,10 @@
 Продолжать нужно с:
 
 ```text
-Этап 3 Step 5 завершен - продолжать с Step 6 RegisterDto
+Этап 3 Step 7 завершен - продолжать с Step 8 Password hashing
 ```
 
-Причина: email normalization добавлена в `UsersService` для поиска и создания пользователей.
+Причина: `LoginDto` создан и валидирует поля входа.
 
 Ключевые выводы аудита:
 
@@ -83,6 +83,19 @@
 - Step 5 Email normalization завершен:
   - `UsersService.findByEmail`, `findByEmailWithPassword` и `create` нормализуют email через `trim().toLowerCase()`;
   - password не нормализуется и не меняется.
+- Step 6 RegisterDto завершен:
+  - добавлен `apps/backend/src/auth/dto/register.dto.ts`;
+  - DTO принимает только `email`, `password`, `name`;
+  - `language` при регистрации не принимается, используется database default `en`;
+  - email валидируется как email с max length 320;
+  - password валидируется как string длиной 8-128;
+  - name валидируется как непустой string с max length 120.
+- Step 7 LoginDto завершен:
+  - добавлен `apps/backend/src/auth/dto/login.dto.ts`;
+  - DTO принимает только `email` и `password`;
+  - email валидируется как email с max length 320;
+  - password валидируется как string длиной 8-128;
+  - `name`, `language`, `id`, `role` не принимаются.
 
 ## Чеклист Этапа 1
 
@@ -125,7 +138,9 @@
 - [x] Step 3 - Environment configuration.
 - [x] Step 4 - UsersService.
 - [x] Step 5 - Email normalization.
-- [ ] Step 6+ - DTO/auth module/service/controller/guard/decorators/tests/manual verification по `CODEX_TASK.md`.
+- [x] Step 6 - RegisterDto.
+- [x] Step 7 - LoginDto.
+- [ ] Step 8+ - Password hashing/auth module/service/controller/guard/decorators/tests/manual verification по `CODEX_TASK.md`.
 
 ## Уже сделано
 
