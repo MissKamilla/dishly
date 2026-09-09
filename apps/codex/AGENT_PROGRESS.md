@@ -21,10 +21,10 @@
 Продолжать нужно с:
 
 ```text
-Этап 3 Step 12 завершен - продолжать с Step 13 JWT configuration
+Этап 3 Step 13 завершен - продолжать с Step 14 Authentication cookie
 ```
 
-Причина: `AuthService.login` создан и возвращает одинаковый `401 Unauthorized` для unknown email и wrong password.
+Причина: `JwtModule` подключен через `ConfigService` в `AuthModule`.
 
 Ключевые выводы аудита:
 
@@ -133,6 +133,15 @@
   - successful login возвращает `PublicUser` + internal `accessToken`;
   - unknown email и wrong password возвращают одинаковый `UnauthorizedException('Invalid email or password')`;
   - JWT payload содержит только `{ sub: user.id }`.
+- Step 13 JWT configuration завершен:
+  - добавлен `apps/backend/src/auth/auth.module.ts`;
+  - `AuthModule` импортирует `UsersModule`;
+  - `JwtModule.registerAsync` использует `ConfigService`;
+  - JWT secret берется из `JWT_SECRET`;
+  - JWT expiration берется из `JWT_EXPIRES_IN_SECONDS`;
+  - `AuthService` и `PasswordService` зарегистрированы как providers в `AuthModule`;
+  - `AuthModule` подключен в `AppModule`;
+  - refresh tokens не добавлялись.
 
 ## Чеклист Этапа 1
 
@@ -182,7 +191,8 @@
 - [x] Step 10 - AuthService Register.
 - [x] Step 11 - Public User.
 - [x] Step 12 - AuthService Login.
-- [ ] Step 13+ - JWT configuration/auth module/controller/guard/decorators/tests/manual verification по `CODEX_TASK.md`.
+- [x] Step 13 - JWT configuration.
+- [ ] Step 14+ - Authentication cookie/controller/guard/decorators/tests/manual verification по `CODEX_TASK.md`.
 
 ## Уже сделано
 

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AuthModule } from './auth/auth.module';
 import { validateEnvironment } from './config/validate-environment';
 import { createRuntimeDatabaseOptions } from './database/typeorm.config';
 import { HealthController } from './health.controller';
@@ -20,6 +21,7 @@ import { UsersModule } from './users/users.module';
           configService.getOrThrow<string>(name),
         ),
     }),
+    AuthModule,
     RecipesModule,
     UsersModule,
   ],
