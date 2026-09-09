@@ -1,30 +1,30 @@
 # Рабочие заметки Codex по Dishly
 
-Последнее обновление: 2026-09-08.
+Последнее обновление: 2026-09-09.
 
 ## Текущий контекст
 
 - Проект: Dishly.
-- Текущий этап: Этап 2 - Database Schema and TypeORM Entities.
-- Текущая ветка: `feature/database-schema`.
+- Текущий этап: Этап 3 - Backend Authentication.
+- Текущая ветка: `feature/auth`.
 - Последние коммиты:
   - `69fdfee Merge pull request #1 from MissKamilla/feature/project-bootstrap`
   - `f017d83 feat: complete project bootstrap`
   - `d7012f4 feat: scaffold React frontend`
   - `2d8995d chore: configure TypeORM and Redis infrastructure`
   - `a7ee82b chore: add PostgreSQL docker compose service`
-- Главный принцип этапа: реализовать persistence-модель и migrations без бизнес-логики.
-- Нельзя переходить к auth, recipes CRUD, parser, queue jobs, frontend и i18n.
+- Главный принцип этапа: реализовать backend authentication через JWT + HttpOnly cookie без refresh/session/OAuth.
+- Нельзя переходить к Recipes API, queue, parser или frontend authentication.
 
 ## На чем остановились
 
 Продолжать нужно с:
 
 ```text
-Этап 2 завершен - можно делать commit entities/schema
+Этап 3 Step 3 завершен - продолжать с Step 4 UsersService
 ```
 
-Причина: финальные проверки этапа 2 пройдены.
+Причина: auth environment variables описаны, `.env.example` содержит восстановимый dev config, приложение теперь валидирует JWT env на старте.
 
 Ключевые выводы аудита:
 
@@ -54,6 +54,25 @@
   - `apps/backend/src/recipes/entities/recipe-step.entity.ts`;
   - `apps/backend/src/recipes/recipes.module.ts`;
   - `RecipesModule` подключен в `AppModule`.
+- Auth-related dependencies уже присутствуют:
+  - `@nestjs/jwt@12.0.1`;
+  - `argon2@0.45.1`;
+  - `cookie-parser@1.4.7`;
+  - `class-validator@0.15.1`;
+  - `class-transformer@0.5.1`;
+  - `@types/cookie-parser@1.4.10`.
+- `apps/backend/src/main.ts` уже содержит global `ValidationPipe` с `whitelist`, `transform`, `forbidNonWhitelisted`.
+- CORS уже включен с origin из `FRONTEND_URL`; для cookie-auth на одном из следующих шагов нужно добавить `credentials: true`.
+- `UsersModule` пока содержит только `TypeOrmModule.forFeature([User])`; `UsersService` еще не создан.
+- `AuthModule`, `AuthController`, `AuthService`, DTO, guard, decorators и auth types еще не созданы.
+- Step 3 Environment configuration завершен:
+  - `apps/backend/.env.example` содержит `NODE_ENV`, `JWT_SECRET`, `JWT_EXPIRES_IN_SECONDS`;
+  - `JWT_SECRET` в `.env.example` содержит dev-only значение `dishly_local_development_jwt_secret_replace_before_real_deploy`;
+  - локальный `apps/backend/.env` уже содержит dev JWT config и игнорируется Git;
+  - добавлен `apps/backend/src/config/validate-environment.ts`;
+  - `ConfigModule.forRoot` подключает `validateEnvironment`;
+  - при пустом `JWT_SECRET` приложение падает на старте;
+  - `JWT_EXPIRES_IN_SECONDS` должен быть положительным целым числом.
 
 ## Чеклист Этапа 1
 
@@ -88,6 +107,14 @@
 - [x] Step 9 - Initial migration.
 - [x] Step 11 - проверить migration lifecycle.
 - [x] Step 12 - объяснить SQL-модель.
+
+## Чеклист Этапа 3
+
+- [x] Step 1 - Audit перед Auth.
+- [x] Step 2 - Dependencies.
+- [x] Step 3 - Environment configuration.
+- [ ] Step 4 - UsersService.
+- [ ] Step 5+ - Auth module/service/controller/guard/decorators/tests/manual verification по `CODEX_TASK.md`.
 
 ## Уже сделано
 
@@ -352,6 +379,7 @@ app.useGlobalPipes(
 - Runtime TypeORM config и CLI DataSource используют общий helper без Nest-зависимостей.
 - Текущий `typeorm@1.1.1` выглядит новым ESM-aware пакетом с `DataSource` и CLI wrappers `typeorm-ts-node-commonjs` / `typeorm-ts-node-esm`; для текущего проекта выбран и проверен `typeorm-ts-node-commonjs`.
 - По договоренности с разработчиком: если нужно что-то установить или запустить, сначала дать команду и объяснить зачем; разработчик выполнит команду самостоятельно.
+- По договоренности с разработчиком: для учебного проекта `.env.example` должен содержать полный восстановимый local/dev config, кроме личных паролей и настоящих секретов сторонних сервисов.
 - Следить за одинаковым стилем и порядком во всех файлах.
 - Commit `4afcc03 chore: configure TypeORM migrations` уже содержит migration infrastructure Step 2; следующий commit должен покрыть entities + initial migration.
 
