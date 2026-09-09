@@ -21,10 +21,10 @@
 Продолжать нужно с:
 
 ```text
-Этап 3 Step 7 завершен - продолжать с Step 8 Password hashing
+Этап 3 Step 12 завершен - продолжать с Step 13 JWT configuration
 ```
 
-Причина: `LoginDto` создан и валидирует поля входа.
+Причина: `AuthService.login` создан и возвращает одинаковый `401 Unauthorized` для unknown email и wrong password.
 
 Ключевые выводы аудита:
 
@@ -96,6 +96,43 @@
   - email валидируется как email с max length 320;
   - password валидируется как string длиной 8-128;
   - `name`, `language`, `id`, `role` не принимаются.
+- Step 8 Password hashing завершен:
+  - добавлен `apps/backend/src/auth/password.service.ts`;
+  - `PasswordService.hashPassword` использует `argon2.hash` с `type: argon2id`;
+  - `PasswordService.verifyPassword` использует `argon2.verify`;
+  - plain password не логируется, не сохраняется и не нормализуется.
+- Step 9 Duplicate email подготовлен:
+  - добавлен `apps/backend/src/database/postgres-error.ts`;
+  - helper `isPostgresUniqueViolation` распознает PostgreSQL unique violation code `23505`;
+  - после senior review helper усилен optional проверкой имени constraint;
+  - `User` entity экспортирует `USER_EMAIL_UNIQUE_CONSTRAINT = 'UQ_users_email'`;
+  - добавлен `apps/backend/src/users/errors/duplicate-user-email.error.ts`;
+  - `UsersService.create` ловит unique violation именно по `UQ_users_email` при `repository.save()` и бросает `DuplicateUserEmailError`;
+  - raw PostgreSQL unique violation не должен уходить выше в auth flow;
+  - HTTP `409 Conflict` подключен в `AuthService.register`.
+- Step 10 AuthService Register завершен:
+  - добавлен `apps/backend/src/auth/auth.service.ts`;
+  - добавлены auth types в одном файле `apps/backend/src/auth/types/auth.types.ts`: `JwtPayload`, `PublicUser`, `AuthResult`;
+  - `register` принимает `RegisterDto`;
+  - duplicate email pre-check выполняется через `UsersService.findByEmail`;
+  - password хешируется через `PasswordService.hashPassword`;
+  - user создается через `UsersService.create`;
+  - race-condition duplicate из database unique violation превращается в `ConflictException`;
+  - JWT payload содержит только `{ sub: user.id }`;
+  - service возвращает `PublicUser` + internal `accessToken` для будущей установки cookie controller-ом;
+  - `AuthService` не пишет HTTP cookie.
+- Step 11 Public User завершен:
+  - `PublicUser` содержит только `id`, `email`, `name`, `language`;
+  - `AuthService.toPublicUser` явно мапит `User` entity в public representation;
+  - `passwordHash`, JWT и database timestamps не входят в public user;
+  - отдельный mapper-файл не создавался, чтобы не дробить маленькую auth-логику.
+- Step 12 AuthService Login завершен:
+  - `AuthService.login` принимает `LoginDto`;
+  - пользователь ищется через `UsersService.findByEmailWithPassword`;
+  - password проверяется через `PasswordService.verifyPassword`;
+  - successful login возвращает `PublicUser` + internal `accessToken`;
+  - unknown email и wrong password возвращают одинаковый `UnauthorizedException('Invalid email or password')`;
+  - JWT payload содержит только `{ sub: user.id }`.
 
 ## Чеклист Этапа 1
 
@@ -140,7 +177,12 @@
 - [x] Step 5 - Email normalization.
 - [x] Step 6 - RegisterDto.
 - [x] Step 7 - LoginDto.
-- [ ] Step 8+ - Password hashing/auth module/service/controller/guard/decorators/tests/manual verification по `CODEX_TASK.md`.
+- [x] Step 8 - Password hashing.
+- [x] Step 9 - Duplicate email lower-level handling.
+- [x] Step 10 - AuthService Register.
+- [x] Step 11 - Public User.
+- [x] Step 12 - AuthService Login.
+- [ ] Step 13+ - JWT configuration/auth module/controller/guard/decorators/tests/manual verification по `CODEX_TASK.md`.
 
 ## Уже сделано
 

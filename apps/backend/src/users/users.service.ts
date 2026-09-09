@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { User } from './entities/user.entity';
+import { isPostgresUniqueViolation } from '../database/postgres-error';
+import { USER_EMAIL_UNIQUE_CONSTRAINT, User } from './entities/user.entity';
+import { DuplicateUserEmailError } from './errors/duplicate-user-email.error';
 
 type CreateUserData = {
   email: string;
@@ -38,12 +40,13 @@ export class UsersService {
   }
 
   async create(data: CreateUserData): Promise<User> {
+    const normalizedEmail = this.normalizeEmail(data.email);
     const user = this.usersRepository.create({
       ...data,
-      email: this.normalizeEmail(data.email),
+      email: normalizedEmail,
     });
 
-    const savedUser = await this.usersRepository.save(user);
+    const savedUser = await this.saveUser(user);
     const createdUser = await this.findById(savedUser.id);
 
     if (!createdUser) {
@@ -55,5 +58,17 @@ export class UsersService {
 
   private normalizeEmail(email: string): string {
     return email.trim().toLowerCase();
+  }
+
+  private async saveUser(user: User): Promise<User> {
+    try {
+      return await this.usersRepository.save(user);
+    } catch (error) {
+      if (isPostgresUniqueViolation(error, USER_EMAIL_UNIQUE_CONSTRAINT)) {
+        throw new DuplicateUserEmailError();
+      }
+
+      throw error;
+    }
   }
 }
