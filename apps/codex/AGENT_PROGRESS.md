@@ -1,6 +1,6 @@
 # Рабочие заметки Codex по Dishly
 
-Последнее обновление: 2026-09-09.
+Последнее обновление: 2026-09-13.
 
 ## Текущий контекст
 
@@ -21,10 +21,10 @@
 Продолжать нужно с:
 
 ```text
-Этап 3 Step 13 завершен - продолжать с Step 14 Authentication cookie
+Этап 3 Step 22 завершен - продолжать с Step 23 Controller boundaries
 ```
 
-Причина: `JwtModule` подключен через `ConfigService` в `AuthModule`.
+Причина: module structure проверена, circular dependencies не обнаружены.
 
 Ключевые выводы аудита:
 
@@ -64,7 +64,7 @@
 - `apps/backend/src/main.ts` уже содержит global `ValidationPipe` с `whitelist`, `transform`, `forbidNonWhitelisted`.
 - CORS уже включен с origin из `FRONTEND_URL`; для cookie-auth на одном из следующих шагов нужно добавить `credentials: true`.
 - `UsersModule` содержит `TypeOrmModule.forFeature([User])`, provides/exports `UsersService`.
-- `AuthModule`, `AuthController`, `AuthService`, DTO, guard, decorators и auth types еще не созданы.
+- `AuthModule`, `AuthController`, `AuthService`, DTO, guard, decorators и auth types созданы.
 - Step 3 Environment configuration завершен:
   - `apps/backend/.env.example` содержит `NODE_ENV`, `JWT_SECRET`, `JWT_EXPIRES_IN_SECONDS`;
   - `JWT_SECRET` в `.env.example` содержит dev-only значение `dishly_local_development_jwt_secret_replace_before_real_deploy`;
@@ -142,6 +142,68 @@
   - `AuthService` и `PasswordService` зарегистрированы как providers в `AuthModule`;
   - `AuthModule` подключен в `AppModule`;
   - refresh tokens не добавлялись.
+- Step 14 Authentication cookie завершен:
+  - добавлен `apps/backend/src/auth/auth.constants.ts`;
+  - cookie name: `dishly_access_token`;
+  - добавлен `apps/backend/src/auth/auth.config.ts`;
+  - `createAuthCookieOptions` выставляет `httpOnly: true`, `sameSite: 'lax'`, `path: '/'`, `secure: NODE_ENV === 'production'`;
+  - cookie `maxAge` считается из `JWT_EXPIRES_IN_SECONDS * 1000`;
+  - `createClearAuthCookieOptions` использует совместимые `path`, `sameSite`, `secure`;
+  - `createJwtModuleOptions` перенесен в `auth.config.ts`, чтобы JWT и cookie использовали общий источник expiration.
+- Step 15 AuthController частично завершен:
+  - добавлен `apps/backend/src/auth/auth.controller.ts`;
+  - `AuthController` зарегистрирован в `AuthModule`;
+  - `POST /auth/register` вызывает `AuthService.register`, ставит `dishly_access_token` cookie и возвращает `PublicUser`;
+  - `POST /auth/login` вызывает `AuthService.login`, ставит `dishly_access_token` cookie и возвращает `PublicUser`;
+  - `POST /auth/logout` idempotent, возвращает `204 No Content` и очищает cookie совместимыми options;
+  - JWT не возвращается в response body;
+  - `GET /auth/current` намеренно не добавлен на этом шаге, потому что для корректной реализации нужны `cookie-parser`, `JwtAuthGuard` и `@CurrentUser`.
+- Step 16 cookie-parser завершен:
+  - `cookie-parser` подключен в `apps/backend/src/main.ts`;
+  - будущий `JwtAuthGuard` должен читать JWT из `request.cookies.dishly_access_token`;
+  - token не должен искаться в query string, request body или localStorage.
+- Step 17 CORS завершен:
+  - `apps/backend/src/main.ts` сохраняет `origin: FRONTEND_URL`;
+  - добавлен `credentials: true`;
+  - `origin: '*'` не используется;
+  - frontend на этом этапе не менялся.
+- Step 18 JwtAuthGuard завершен:
+  - добавлен `apps/backend/src/auth/decorators/public.decorator.ts`;
+  - `@Public()` выставляет metadata key `isPublicRoute`;
+  - добавлен `apps/backend/src/auth/guards/jwt-auth.guard.ts`;
+  - guard проверяет public route через `Reflector.getAllAndOverride`;
+  - JWT читается только из `request.cookies.dishly_access_token`;
+  - missing/invalid/expired token возвращают общий `UnauthorizedException('Authentication required')`;
+  - payload валидируется runtime-safe как object с positive integer `sub`;
+  - в request кладется минимальный authenticated user `{ id: payload.sub }`;
+  - `JwtAuthGuard` зарегистрирован provider-ом в `AuthModule`, но еще не подключен global guard-ом.
+- Step 19 Auth по умолчанию завершен:
+  - `JwtAuthGuard` подключен как global guard через `APP_GUARD` в `AuthModule`;
+  - backend стал secure-by-default: routes protected по умолчанию;
+  - следующий Step 20 должен пометить `/health`, `/auth/register`, `/auth/login`, `/auth/logout` как public, иначе они будут закрыты guard-ом.
+- Step 20 Public endpoints завершен:
+  - `POST /auth/register`, `POST /auth/login`, `POST /auth/logout` помечены `@Public()`;
+  - `GET /health` помечен `@Public()`;
+  - `GET /auth/current` пока не добавлен и должен остаться protected.
+- Step 21 CurrentUser decorator завершен:
+  - добавлен `apps/backend/src/auth/decorators/current-user.decorator.ts`;
+  - decorator достает `request.user`, который заполняет `JwtAuthGuard`;
+  - business logic в decorator не добавлялась.
+- Step 15 follow-up GET /auth/current завершен:
+  - `AuthController.getCurrentUser` добавлен как `GET /auth/current` без `@Public()`, поэтому endpoint protected global guard-ом;
+  - controller получает `{ id }` через `@CurrentUser()`;
+  - `AuthService.getCurrentUser` загружает пользователя из PostgreSQL через `UsersService.findById`;
+  - если пользователь из JWT больше не существует в БД, возвращается `UnauthorizedException('Authentication required')`;
+  - response использует `PublicUser`, JWT данные напрямую не возвращаются.
+- Step 22 Module structure завершен:
+  - `AuthModule` импортирует `UsersModule`;
+  - `AuthModule` настраивает `JwtModule` через `ConfigService`;
+  - `AuthModule` exposes `AuthController`;
+  - `AuthModule` provides `AuthService`, `PasswordService`, global `JwtAuthGuard` через `APP_GUARD`;
+  - `UsersModule` импортирует `TypeOrmModule.forFeature([User])`;
+  - `UsersModule` provides/exports `UsersService`;
+  - circular dependencies не обнаружены;
+  - прямой импорт `UsersModule` в `AppModule` оставлен как не блокирующий и не создающий cycle.
 
 ## Чеклист Этапа 1
 
@@ -192,7 +254,18 @@
 - [x] Step 11 - Public User.
 - [x] Step 12 - AuthService Login.
 - [x] Step 13 - JWT configuration.
-- [ ] Step 14+ - Authentication cookie/controller/guard/decorators/tests/manual verification по `CODEX_TASK.md`.
+- [x] Step 14 - Authentication cookie.
+- [x] Step 15 - AuthController public endpoints: register/login/logout.
+- [ ] Step 15 follow-up - GET /auth/current после guard/current-user.
+- [x] Step 16 - cookie-parser.
+- [x] Step 17 - CORS.
+- [x] Step 18 - JwtAuthGuard.
+- [x] Step 19 - Auth по умолчанию.
+- [x] Step 20 - Public endpoints.
+- [x] Step 21 - @CurrentUser decorator.
+- [x] Step 15 follow-up - GET /auth/current после guard/current-user.
+- [x] Step 22 - Module structure.
+- [ ] Step 23+ - Controller boundaries/security checks/tests/manual verification по `CODEX_TASK.md`.
 
 ## Уже сделано
 

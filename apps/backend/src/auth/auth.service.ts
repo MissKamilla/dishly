@@ -75,6 +75,16 @@ export class AuthService {
     };
   }
 
+  async getCurrentUser(userId: number): Promise<PublicUser> {
+    const user = await this.usersService.findById(userId);
+
+    if (!user) {
+      throw this.createInvalidSessionException();
+    }
+
+    return this.toPublicUser(user);
+  }
+
   private async createAccessToken(userId: number): Promise<string> {
     const payload: JwtPayload = {
       sub: userId,
@@ -98,5 +108,9 @@ export class AuthService {
 
   private createInvalidCredentialsException(): UnauthorizedException {
     return new UnauthorizedException('Invalid email or password');
+  }
+
+  private createInvalidSessionException(): UnauthorizedException {
+    return new UnauthorizedException('Authentication required');
   }
 }
