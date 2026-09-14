@@ -1,30 +1,31 @@
 # Рабочие заметки Codex по Dishly
 
-Последнее обновление: 2026-09-08.
+Последнее обновление: 2026-09-14.
 
 ## Текущий контекст
 
 - Проект: Dishly.
-- Текущий этап: Этап 2 - Database Schema and TypeORM Entities.
-- Текущая ветка: `feature/database-schema`.
+- Текущий этап: Этап 3 - Backend Authentication завершен.
+- Текущая ветка: `feature/auth`.
 - Последние коммиты:
   - `69fdfee Merge pull request #1 from MissKamilla/feature/project-bootstrap`
   - `f017d83 feat: complete project bootstrap`
   - `d7012f4 feat: scaffold React frontend`
   - `2d8995d chore: configure TypeORM and Redis infrastructure`
   - `a7ee82b chore: add PostgreSQL docker compose service`
-- Главный принцип этапа: реализовать persistence-модель и migrations без бизнес-логики.
-- Нельзя переходить к auth, recipes CRUD, parser, queue jobs, frontend и i18n.
+- Главный принцип этапа: реализовать backend authentication через JWT + HttpOnly cookie без refresh/session/OAuth.
+- Следующий этап по плану: Этап 4 - Recipes Backend API без Parser и Queue.
+- Не переходить к следующему этапу без явной команды разработчика.
 
 ## На чем остановились
 
 Продолжать нужно с:
 
 ```text
-Этап 2 завершен - можно делать commit entities/schema
+Этап 3 Step 34 завершен - Backend Authentication готов к переходу на Этап 4
 ```
 
-Причина: финальные проверки этапа 2 пройдены.
+Причина: финальный review завершен, блокирующих проблем нет, все проверки этапа пройдены.
 
 Ключевые выводы аудита:
 
@@ -54,6 +55,257 @@
   - `apps/backend/src/recipes/entities/recipe-step.entity.ts`;
   - `apps/backend/src/recipes/recipes.module.ts`;
   - `RecipesModule` подключен в `AppModule`.
+- Auth-related dependencies уже присутствуют:
+  - `@nestjs/jwt@12.0.1`;
+  - `argon2@0.45.1`;
+  - `cookie-parser@1.4.7`;
+  - `class-validator@0.15.1`;
+  - `class-transformer@0.5.1`;
+  - `@types/cookie-parser@1.4.10`.
+- `apps/backend/src/main.ts` уже содержит global `ValidationPipe` с `whitelist`, `transform`, `forbidNonWhitelisted`.
+- CORS уже включен с origin из `FRONTEND_URL`; для cookie-auth на одном из следующих шагов нужно добавить `credentials: true`.
+- `UsersModule` содержит `TypeOrmModule.forFeature([User])`, provides/exports `UsersService`.
+- `AuthModule`, `AuthController`, `AuthService`, DTO, guard, decorators и auth types созданы.
+- Step 3 Environment configuration завершен:
+  - `apps/backend/.env.example` содержит `NODE_ENV`, `JWT_SECRET`, `JWT_EXPIRES_IN_SECONDS`;
+  - `JWT_SECRET` в `.env.example` содержит dev-only значение `dishly_local_development_jwt_secret_replace_before_real_deploy`;
+  - локальный `apps/backend/.env` уже содержит dev JWT config и игнорируется Git;
+  - добавлен `apps/backend/src/config/validate-environment.ts`;
+  - `ConfigModule.forRoot` подключает `validateEnvironment`;
+  - при пустом `JWT_SECRET` приложение падает на старте;
+  - `JWT_EXPIRES_IN_SECONDS` должен быть положительным целым числом.
+- Step 4 UsersService завершен:
+  - добавлен `apps/backend/src/users/users.service.ts`;
+  - `UsersService` использует стандартный TypeORM `Repository<User>` через `@InjectRepository(User)`;
+  - методы: `findById`, `findByEmail`, `findByEmailWithPassword`, `create`;
+  - `findByEmailWithPassword` явно добавляет `user.passwordHash` через query builder, потому что `passwordHash` имеет `select: false`;
+  - `create` после сохранения перечитывает пользователя обычным query и возвращает public `User` без `passwordHash`;
+  - `UsersModule` теперь provides/exports `UsersService`.
+- Step 5 Email normalization завершен:
+  - `UsersService.findByEmail`, `findByEmailWithPassword` и `create` нормализуют email через `trim().toLowerCase()`;
+  - password не нормализуется и не меняется.
+- Step 6 RegisterDto завершен:
+  - добавлен `apps/backend/src/auth/dto/register.dto.ts`;
+  - DTO принимает только `email`, `password`, `name`;
+  - `language` при регистрации не принимается, используется database default `en`;
+  - email валидируется как email с max length 320;
+  - password валидируется как string длиной 8-128;
+  - name валидируется как непустой string с max length 120.
+- Step 7 LoginDto завершен:
+  - добавлен `apps/backend/src/auth/dto/login.dto.ts`;
+  - DTO принимает только `email` и `password`;
+  - email валидируется как email с max length 320;
+  - password валидируется как string длиной 8-128;
+  - `name`, `language`, `id`, `role` не принимаются.
+- Step 8 Password hashing завершен:
+  - добавлен `apps/backend/src/auth/password.service.ts`;
+  - `PasswordService.hashPassword` использует `argon2.hash` с `type: argon2id`;
+  - `PasswordService.verifyPassword` использует `argon2.verify`;
+  - plain password не логируется, не сохраняется и не нормализуется.
+- Step 9 Duplicate email подготовлен:
+  - добавлен `apps/backend/src/database/postgres-error.ts`;
+  - helper `isPostgresUniqueViolation` распознает PostgreSQL unique violation code `23505`;
+  - после senior review helper усилен optional проверкой имени constraint;
+  - `User` entity экспортирует `USER_EMAIL_UNIQUE_CONSTRAINT = 'UQ_users_email'`;
+  - добавлен `apps/backend/src/users/errors/duplicate-user-email.error.ts`;
+  - `UsersService.create` ловит unique violation именно по `UQ_users_email` при `repository.save()` и бросает `DuplicateUserEmailError`;
+  - raw PostgreSQL unique violation не должен уходить выше в auth flow;
+  - HTTP `409 Conflict` подключен в `AuthService.register`.
+- Step 10 AuthService Register завершен:
+  - добавлен `apps/backend/src/auth/auth.service.ts`;
+  - добавлены auth types в одном файле `apps/backend/src/auth/types/auth.types.ts`: `JwtPayload`, `PublicUser`, `AuthResult`;
+  - `register` принимает `RegisterDto`;
+  - duplicate email pre-check выполняется через `UsersService.findByEmail`;
+  - password хешируется через `PasswordService.hashPassword`;
+  - user создается через `UsersService.create`;
+  - race-condition duplicate из database unique violation превращается в `ConflictException`;
+  - JWT payload содержит только `{ sub: user.id }`;
+  - service возвращает `PublicUser` + internal `accessToken` для будущей установки cookie controller-ом;
+  - `AuthService` не пишет HTTP cookie.
+- Step 11 Public User завершен:
+  - `PublicUser` содержит только `id`, `email`, `name`, `language`;
+  - `AuthService.toPublicUser` явно мапит `User` entity в public representation;
+  - `passwordHash`, JWT и database timestamps не входят в public user;
+  - отдельный mapper-файл не создавался, чтобы не дробить маленькую auth-логику.
+- Step 12 AuthService Login завершен:
+  - `AuthService.login` принимает `LoginDto`;
+  - пользователь ищется через `UsersService.findByEmailWithPassword`;
+  - password проверяется через `PasswordService.verifyPassword`;
+  - successful login возвращает `PublicUser` + internal `accessToken`;
+  - unknown email и wrong password возвращают одинаковый `UnauthorizedException('Invalid email or password')`;
+  - JWT payload содержит только `{ sub: user.id }`.
+- Step 13 JWT configuration завершен:
+  - добавлен `apps/backend/src/auth/auth.module.ts`;
+  - `AuthModule` импортирует `UsersModule`;
+  - `JwtModule.registerAsync` использует `ConfigService`;
+  - JWT secret берется из `JWT_SECRET`;
+  - JWT expiration берется из `JWT_EXPIRES_IN_SECONDS`;
+  - `AuthService` и `PasswordService` зарегистрированы как providers в `AuthModule`;
+  - `AuthModule` подключен в `AppModule`;
+  - refresh tokens не добавлялись.
+- Step 14 Authentication cookie завершен:
+  - добавлен `apps/backend/src/auth/auth.constants.ts`;
+  - cookie name: `dishly_access_token`;
+  - добавлен `apps/backend/src/auth/auth.config.ts`;
+  - `createAuthCookieOptions` выставляет `httpOnly: true`, `sameSite: 'lax'`, `path: '/'`, `secure: NODE_ENV === 'production'`;
+  - cookie `maxAge` считается из `JWT_EXPIRES_IN_SECONDS * 1000`;
+  - `createClearAuthCookieOptions` использует совместимые `path`, `sameSite`, `secure`;
+  - `createJwtModuleOptions` перенесен в `auth.config.ts`, чтобы JWT и cookie использовали общий источник expiration.
+- Step 15 AuthController частично завершен:
+  - добавлен `apps/backend/src/auth/auth.controller.ts`;
+  - `AuthController` зарегистрирован в `AuthModule`;
+  - `POST /auth/register` вызывает `AuthService.register`, ставит `dishly_access_token` cookie и возвращает `PublicUser`;
+  - `POST /auth/login` вызывает `AuthService.login`, ставит `dishly_access_token` cookie и возвращает `PublicUser`;
+  - `POST /auth/logout` idempotent, возвращает `204 No Content` и очищает cookie совместимыми options;
+  - JWT не возвращается в response body;
+  - `GET /auth/current` намеренно не добавлен на этом шаге, потому что для корректной реализации нужны `cookie-parser`, `JwtAuthGuard` и `@CurrentUser`.
+- Step 16 cookie-parser завершен:
+  - `cookie-parser` подключен в `apps/backend/src/main.ts`;
+  - будущий `JwtAuthGuard` должен читать JWT из `request.cookies.dishly_access_token`;
+  - token не должен искаться в query string, request body или localStorage.
+- Step 17 CORS завершен:
+  - `apps/backend/src/main.ts` сохраняет `origin: FRONTEND_URL`;
+  - добавлен `credentials: true`;
+  - `origin: '*'` не используется;
+  - frontend на этом этапе не менялся.
+- Step 18 JwtAuthGuard завершен:
+  - добавлен `apps/backend/src/auth/decorators/public.decorator.ts`;
+  - `@Public()` выставляет metadata key `isPublicRoute`;
+  - добавлен `apps/backend/src/auth/guards/jwt-auth.guard.ts`;
+  - guard проверяет public route через `Reflector.getAllAndOverride`;
+  - JWT читается только из `request.cookies.dishly_access_token`;
+  - missing/invalid/expired token возвращают общий `UnauthorizedException('Authentication required')`;
+  - payload валидируется runtime-safe как object с positive integer `sub`;
+  - в request кладется минимальный authenticated user `{ id: payload.sub }`;
+  - `JwtAuthGuard` зарегистрирован provider-ом в `AuthModule`, но еще не подключен global guard-ом.
+- Step 19 Auth по умолчанию завершен:
+  - `JwtAuthGuard` подключен как global guard через `APP_GUARD` в `AuthModule`;
+  - backend стал secure-by-default: routes protected по умолчанию;
+  - следующий Step 20 должен пометить `/health`, `/auth/register`, `/auth/login`, `/auth/logout` как public, иначе они будут закрыты guard-ом.
+- Step 20 Public endpoints завершен:
+  - `POST /auth/register`, `POST /auth/login`, `POST /auth/logout` помечены `@Public()`;
+  - `GET /health` помечен `@Public()`;
+  - `GET /auth/current` пока не добавлен и должен остаться protected.
+- Step 21 CurrentUser decorator завершен:
+  - добавлен `apps/backend/src/auth/decorators/current-user.decorator.ts`;
+  - decorator достает `request.user`, который заполняет `JwtAuthGuard`;
+  - business logic в decorator не добавлялась.
+- Step 15 follow-up GET /auth/current завершен:
+  - `AuthController.getCurrentUser` добавлен как `GET /auth/current` без `@Public()`, поэтому endpoint protected global guard-ом;
+  - controller получает `{ id }` через `@CurrentUser()`;
+  - `AuthService.getCurrentUser` загружает пользователя из PostgreSQL через `UsersService.findById`;
+  - если пользователь из JWT больше не существует в БД, возвращается `UnauthorizedException('Authentication required')`;
+  - response использует `PublicUser`, JWT данные напрямую не возвращаются.
+- Step 22 Module structure завершен:
+  - `AuthModule` импортирует `UsersModule`;
+  - `AuthModule` настраивает `JwtModule` через `ConfigService`;
+  - `AuthModule` exposes `AuthController`;
+  - `AuthModule` provides `AuthService`, `PasswordService`, global `JwtAuthGuard` через `APP_GUARD`;
+  - `UsersModule` импортирует `TypeOrmModule.forFeature([User])`;
+  - `UsersModule` provides/exports `UsersService`;
+  - circular dependencies не обнаружены;
+  - прямой импорт `UsersModule` в `AppModule` оставлен как не блокирующий и не создающий cycle.
+- Step 23 Controller boundaries завершен:
+  - `AuthController` не импортирует `Repository`, `InjectRepository`, `argon2`, `JwtService` и не содержит SQL/TypeORM calls;
+  - controller отвечает за HTTP input/output, cookie set/clear и вызовы `AuthService`;
+  - password hashing, password verification, JWT creation, duplicate email handling и user loading остаются в services;
+  - `GET /auth/current` использует `@CurrentUser()` и делегирует PostgreSQL lookup в `AuthService.getCurrentUser`.
+- Step 24 Security checks завершен:
+  - plaintext password не сохраняется, не возвращается и не логируется;
+  - registration передает plain password только в `PasswordService.hashPassword`, затем в `UsersService.create` уходит только `passwordHash`;
+  - `passwordHash` имеет `select: false`, обычные user queries его не выбирают;
+  - login-specific query явно выбирает `passwordHash` только в `UsersService.findByEmailWithPassword`;
+  - API responses используют `PublicUser`, где нет `passwordHash`, `createdAt`, `updatedAt`;
+  - JWT payload содержит только `{ sub: user.id }`;
+  - JWT не возвращается в response body, а используется только для `dishly_access_token` cookie;
+  - cookie options: `httpOnly: true`, `sameSite: 'lax'`, `path: '/'`, `secure: NODE_ENV === 'production'`;
+  - unknown email и wrong password возвращают одинаковый `UnauthorizedException('Invalid email or password')`;
+  - real production secret не добавлялся; `.env.example` содержит только dev-only local JWT secret по договоренности учебного проекта.
+- Step 25 CSRF scope завершен:
+  - отдельная CSRF library/token mechanism сейчас не добавлялись;
+  - текущий MVP исходит из same-site frontend/backend setup;
+  - auth cookie использует `SameSite=Lax`;
+  - если production deployment позже потребует `SameSite=None` или frontend/backend окажутся truly cross-site, CSRF protection нужно пересмотреть отдельным security task;
+  - frontend на этом шаге не менялся.
+- Step 26 Tests завершен:
+  - добавлен `apps/backend/src/auth/auth.service.spec.ts`;
+  - registration tests проверяют создание user с password hash, duplicate pre-check и database duplicate race conversion в conflict;
+  - login tests проверяют successful login и одинаковый unauthorized response для unknown email/wrong password;
+  - добавлен `apps/backend/src/auth/guards/jwt-auth.guard.spec.ts`;
+  - guard tests проверяют public route, valid cookie token, missing token, invalid token, expired token, invalid payload;
+  - Jest specs мокают ESM Nest packages (`@nestjs/jwt`) там, где это нужно из-за текущего CommonJS Jest setup;
+  - `npm test`, `npm run lint`, `npm run build` из `apps/backend` прошли успешно.
+- Step 27 Manual end-to-end verification завершен:
+  - через реальный HTTP API проверен `GET /health` без authentication: `200`;
+  - через `POST /auth/register` создан тестовый user, response содержит только public user;
+  - registration с email в mixed case и пробелами проверил DTO-level normalization: email сохранен/возвращен в lowercase без пробелов;
+  - проверено, что `Set-Cookie` для `dishly_access_token` приходит на register/login;
+  - `GET /auth/current` с cookie после register возвращает `200`;
+  - `POST /auth/logout` возвращает `204`;
+  - `GET /auth/current` после logout возвращает `401`;
+  - `POST /auth/login` с normalized/mixed-case email возвращает `200`;
+  - `GET /auth/current` после login возвращает `200`;
+  - duplicate registration с тем же email в другом регистре возвращает `409`;
+  - invalid DTO с extra field `isAdmin` возвращает `400` из-за `forbidNonWhitelisted`;
+  - wrong password возвращает `401`;
+  - найден и исправлен баг: `@IsEmail()` отклонял email с пробелами до service-level normalization, поэтому DTO email теперь нормализуется через `@Transform`;
+  - добавлен helper `apps/backend/src/auth/dto/normalize-email.ts`, используемый `RegisterDto` и `LoginDto`;
+  - JWT/token values в progress не записывались.
+- Step 28 PostgreSQL verification завершен:
+  - через `docker exec` и `psql` проверен тестовый user из Step 27;
+  - email в таблице `users` хранится нормализованным: lowercase без пробелов;
+  - duplicate registration не создал вторую запись с тем же email в другом регистре;
+  - `password_hash` заполнен;
+  - `password_hash` начинается с Argon2id marker `$argon2id`;
+  - `password_hash` не равен plain password;
+  - полный hash и JWT/token values в progress не записывались.
+- Step 29 README / environment docs завершен:
+  - root `README.md` обновлен коротким списком backend env variables для auth/runtime;
+  - добавлено краткое описание JWT + HttpOnly cookie strategy;
+  - добавлен короткий список auth endpoints: register, login, logout, current;
+  - Swagger и большая API-документация не добавлялись;
+  - backend Nest starter `apps/backend/README.md` не трогался, чтобы не расширять scope.
+- Step 30 Database schema завершен:
+  - `User`, `Recipe`, `RecipeIngredient`, `RecipeStep` entity files не менялись на auth шаге;
+  - database migrations не менялись и новая migration не создавалась;
+  - auth использует уже существующую колонку `users.password_hash`;
+  - `migration:generate -- src/database/migrations/CheckAuthSchema --dr` показал `No changes in database schema were found`;
+  - exit code `1` у dry-run в этом случае ожидаем, потому что TypeORM не создает migration без schema changes.
+- Step 31 Финальные проверки завершен:
+  - `npm run build` из `apps/backend` прошел успешно;
+  - `npm run lint` из `apps/backend` прошел успешно;
+  - `npm test` из `apps/backend` прошел успешно: 2 suites, 11 tests;
+  - `npm run migration:show` из `apps/backend` прошел успешно и показывает `[X] CreateInitialSchema1788879733493`;
+  - `docker compose ps` показывает `dishly-postgres-1` и `dishly-redis-1` healthy;
+  - проверены `git status`, unstaged `git diff --stat` и staged `git diff --cached --stat`;
+  - часть auth files уже находится в stage, а README/progress имеют unstaged изменения.
+- Step 32 Scope control завершен:
+  - frontend files не менялись;
+  - Recipe CRUD, `RecipeService`, `RecipesController` не реализовывались;
+  - BullMQ, Redis integration, queue jobs и worker не реализовывались;
+  - Good Food parser, HTML fetch и JSON-LD не реализовывались;
+  - frontend auth pages/protected routes не реализовывались;
+  - i18next, profile editing, shopping list и AI не добавлялись;
+  - найденный `LoginPage` в `apps/frontend/src/App.tsx` относится к старому bootstrap-коду и не менялся в auth scope.
+- Step 33 Definition of Done завершен:
+  - подтверждено наличие `UsersService`, `RegisterDto`, `LoginDto`;
+  - DTO validation, email normalization и duplicate email handling проверены тестами/manual flow;
+  - password hashing использует Argon2id, plain password не хранится;
+  - `passwordHash` не возвращается обычными user queries и не попадает в public responses;
+  - `POST /auth/register`, `POST /auth/login`, `POST /auth/logout`, `GET /auth/current` работают;
+  - register/login автоматически авторизуют пользователя через HttpOnly cookie;
+  - JWT создается с минимальным payload `{ sub }`, secret/expiration берутся из env;
+  - JWT не возвращается в response body;
+  - cookie options, cookie clear on logout, cookie-parser, CORS credentials, global guard, `@Public()`, `/health`, `@CurrentUser()` проверены;
+  - missing/invalid/expired JWT, wrong password и unknown email возвращают `401`;
+  - focused auth tests, manual flow, DB password_hash verification, build, lint, tests и migration checks пройдены;
+  - frontend, Recipes API, Queue и Parser не реализовывались.
+- Step 34 Финальный review завершен:
+  - MUST FIX: блокирующих проблем не найдено;
+  - SHOULD IMPROVE: перед коммитом обратить внимание, что часть файлов уже staged, а README/progress unstaged;
+  - OPTIONAL: refresh tokens, sessions, CSRF token library, OAuth, email verification и frontend auth оставлены на будущие этапы;
+  - VERDICT: Этап 3 готов к переходу на Этап 4;
+  - следующий этап: Этап 4 - Recipes Backend API без Parser и Queue, но автоматически к нему не переходить.
 
 ## Чеклист Этапа 1
 
@@ -88,6 +340,44 @@
 - [x] Step 9 - Initial migration.
 - [x] Step 11 - проверить migration lifecycle.
 - [x] Step 12 - объяснить SQL-модель.
+
+## Чеклист Этапа 3
+
+- [x] Step 1 - Audit перед Auth.
+- [x] Step 2 - Dependencies.
+- [x] Step 3 - Environment configuration.
+- [x] Step 4 - UsersService.
+- [x] Step 5 - Email normalization.
+- [x] Step 6 - RegisterDto.
+- [x] Step 7 - LoginDto.
+- [x] Step 8 - Password hashing.
+- [x] Step 9 - Duplicate email lower-level handling.
+- [x] Step 10 - AuthService Register.
+- [x] Step 11 - Public User.
+- [x] Step 12 - AuthService Login.
+- [x] Step 13 - JWT configuration.
+- [x] Step 14 - Authentication cookie.
+- [x] Step 15 - AuthController public endpoints: register/login/logout.
+- [x] Step 16 - cookie-parser.
+- [x] Step 17 - CORS.
+- [x] Step 18 - JwtAuthGuard.
+- [x] Step 19 - Auth по умолчанию.
+- [x] Step 20 - Public endpoints.
+- [x] Step 21 - @CurrentUser decorator.
+- [x] Step 15 follow-up - GET /auth/current после guard/current-user.
+- [x] Step 22 - Module structure.
+- [x] Step 23 - Controller boundaries.
+- [x] Step 24 - Security checks.
+- [x] Step 25 - CSRF scope.
+- [x] Step 26 - Tests.
+- [x] Step 27 - Manual end-to-end verification.
+- [x] Step 28 - Проверить PostgreSQL.
+- [x] Step 29 - README / environment docs.
+- [x] Step 30 - Database schema.
+- [x] Step 31 - Финальные проверки.
+- [x] Step 32 - Scope control.
+- [x] Step 33 - Definition of Done.
+- [x] Step 34 - Финальный review.
 
 ## Уже сделано
 
@@ -352,6 +642,8 @@ app.useGlobalPipes(
 - Runtime TypeORM config и CLI DataSource используют общий helper без Nest-зависимостей.
 - Текущий `typeorm@1.1.1` выглядит новым ESM-aware пакетом с `DataSource` и CLI wrappers `typeorm-ts-node-commonjs` / `typeorm-ts-node-esm`; для текущего проекта выбран и проверен `typeorm-ts-node-commonjs`.
 - По договоренности с разработчиком: если нужно что-то установить или запустить, сначала дать команду и объяснить зачем; разработчик выполнит команду самостоятельно.
+- По договоренности с разработчиком: для учебного проекта `.env.example` должен содержать полный восстановимый local/dev config, кроме личных паролей и настоящих секретов сторонних сервисов.
+- Быть внимательным к дублированию: если одна и та же бизнес-операция нужна в нескольких местах, сначала искать или выделять один общий helper в подходящем domain/module boundary, а не копировать логику.
 - Следить за одинаковым стилем и порядком во всех файлах.
 - Commit `4afcc03 chore: configure TypeORM migrations` уже содержит migration infrastructure Step 2; следующий commit должен покрыть entities + initial migration.
 

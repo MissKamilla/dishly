@@ -1,305 +1,57 @@
-# Dishly — Этап 2: Database Schema and TypeORM Entities
+# Dishly — Этап 3: Backend Authentication
 
 Мы продолжаем разработку fullstack-проекта **Dishly**.
+
+Сейчас выполняем только:
+
+**Этап 3 — Backend Authentication**
 
 Перед началом обязательно:
 
 1. прочитай корневой `AGENTS.md`;
 2. прочитай `apps/codex/AGENT_PROGRESS.md`;
-3. изучи текущее состояние `apps/backend`;
-4. не опирайся только на этот текст — сверяй требования с фактическим кодом проекта;
+3. изучи текущий backend-код;
+4. изучи текущие `User` Entity и `UsersModule`;
+5. изучи текущий `AppModule`, `main.ts`, `.env.example`;
+6. выполни `git status`;
+7. не предполагай структуру проекта — сначала проверь фактический код.
+
+Не переходи к Recipes API, Queue, Parser или Frontend.
+
+---
 
 # 1. Текущее состояние проекта
 
 Этап 1 — Project Bootstrap завершён.
 
-Сейчас уже существует:
+Этап 2 — Database Schema and TypeORM Entities завершён.
+
+Сейчас backend уже содержит:
 
 ```text
-dishly/
-├── apps/
-│   ├── backend/
-│   ├── frontend/
-│   └── codex/
-├── AGENTS.md
-├── README.md
-├── docker-compose.yml
-├── .env.example
-└── .gitignore
+NestJS
+TypeScript
+ConfigModule
+ValidationPipe
+TypeORM
+PostgreSQL
+migrations
 ```
 
-Backend уже содержит:
+PostgreSQL schema уже создана через migration.
 
-- NestJS;
-- TypeScript;
-- `@nestjs/config`;
-- `@nestjs/typeorm`;
-- TypeORM;
-- PostgreSQL driver `pg`;
-- глобальный `ValidationPipe`;
-- ConfigModule;
-- CORS;
-- `GET /health`;
-- подключение к PostgreSQL.
-
-Текущая TypeORM-конфигурация находится в:
-
-```text
-apps/backend/src/app.module.ts
-```
-
-и использует:
-
-```ts
-autoLoadEntities: true,
-synchronize: false,
-```
-
-`synchronize: false` необходимо сохранить.
-
-PostgreSQL уже работает через Docker Compose.
-
-Локально используется:
-
-```text
-host: localhost
-port: 5433
-database: dishly
-```
-
-Frontend на этом этапе НЕ трогаем.
-
-Redis на этом этапе НЕ трогаем.
-
----
-
-# 2. Цель этапа
-
-На этом этапе нужно спроектировать и реализовать persistence-модель Dishly.
-
-Нужно получить:
+Основные Entity:
 
 ```text
 User
-  │
-  └── 1:N Recipe
-         │
-         ├── 1:N RecipeIngredient
-         │
-         └── 1:N RecipeStep
-```
-
-Также нужно настроить полноценную работу с TypeORM migrations.
-
-После завершения этапа:
-
-```text
-Entity
-↓
-TypeORM metadata
-↓
-Migration
-↓
-PostgreSQL schema
-```
-
-должны полностью соответствовать друг другу.
-
----
-
-# 3. Главный принцип этапа
-
-Не реализовывать бизнес-логику.
-
-На этом этапе работаем только с:
-
-- Entity;
-- relations;
-- foreign keys;
-- indexes;
-- constraints;
-- enum;
-- migration infrastructure;
-- migrations;
-- минимальными Nest modules, необходимыми для регистрации Entity.
-
-НЕ делать:
-
-- authentication;
-- JWT;
-- register/login;
-- DTO;
-- controllers;
-- services с бизнес-логикой;
-- recipe CRUD;
-- repositories;
-- BullMQ;
-- queue;
-- parser;
-- JSON-LD;
-- frontend;
-- i18n.
-
----
-
-# 4. Как со мной работать
-
-Не выполняй весь этап одним огромным изменением.
-
-Раздели его на логические блоки.
-
-Для каждого блока сначала напиши:
-
-## Что делаем
-
-Коротко.
-
-## Почему
-
-Коротко объясни решение.
-
-## Что собираешься реализовать
-
-Без лишней теории.
-
-После этого выполняй изменения.
-
-После каждого крупного блока:
-
-- запускай подходящую проверку;
-- обновляй `apps/codex/AGENT_PROGRESS.md`;
-- кратко сообщай результат.
-
-Не создавай commit и не добавляй staget!
-
----
-
-# 5. План этапа
-
-Работай в следующем порядке.
-
----
-
-# Step 1 — аудит текущей database-конфигурации
-
-Сначала ничего не меняй.
-
-Изучи:
-
-```text
-apps/backend/src/app.module.ts
-apps/backend/.env.example
-apps/backend/package.json
-apps/backend/tsconfig.json
-docker-compose.yml
-```
-
-Проверь:
-
-- как NestJS сейчас подключается к PostgreSQL;
-- какая версия TypeORM установлена;
-- какой module system используется;
-- как должны запускаться TypeORM migrations в текущем проекте;
-- не потребуется ли отдельный `DataSource` для CLI;
-- как избежать конфликта между runtime TypeORM config и migration config.
-
-Не добавляй новую архитектуру без необходимости.
-
-Особенно не добавляй сторонний `naming strategy` package только ради snake_case.
-
-Названия таблиц и важных колонок можно задавать явно.
-
----
-
-# Step 2 — настроить TypeORM migrations
-
-Создай migration infrastructure для backend.
-
-Предпочтительное направление:
-
-```text
-apps/backend/src/
-├── database/
-│   ├── data-source.ts
-│   └── migrations/
-```
-
-Точное расположение можешь скорректировать, если есть техническая причина.
-
-Нужен TypeORM `DataSource`, который сможет использовать TypeORM CLI.
-
-Он должен использовать те же PostgreSQL environment variables:
-
-```text
-DB_HOST
-DB_PORT
-DB_NAME
-DB_USER
-DB_PASSWORD
-```
-
-Не хардкодить connection values.
-
-Если для загрузки `.env` напрямую в TypeORM CLI требуется `dotenv`, используй его явно как dependency, а не полагайся на случайную transitive dependency.
-
----
-
-## Требования к migration setup
-
-Сохранить:
-
-```ts
-synchronize: false;
-```
-
-Не включать `synchronize: true` даже временно.
-
-Migration должна быть единственным способом создания бизнес-таблиц.
-
-Настрой удобные npm scripts для:
-
-```text
-migration:generate
-migration:run
-migration:revert
-migration:show
-```
-
-Точные команды выбери с учётом фактически установленной версии TypeORM и текущего NodeNext/ESM setup.
-
-После настройки обязательно реально проверь команды.
-
-Не добавляй migration framework поверх TypeORM.
-
----
-
-# Step 3 — User Entity
-
-Создай доменную область пользователя.
-
-Предпочтительная структура:
-
-```text
-src/users/
-├── entities/
-│   └── user.entity.ts
-└── users.module.ts
-```
-
-`UsersModule` сейчас нужен только для корректной регистрации Entity через TypeORM.
-
-Не создавать:
-
-```text
-users.controller.ts
-users.service.ts
-DTO
-auth logic
+Recipe
+RecipeIngredient
+RecipeStep
 ```
 
 ---
 
-## Таблица users
+# 2. Текущий User Entity
 
 Таблица:
 
@@ -307,7 +59,7 @@ auth logic
 users
 ```
 
-Поля:
+Содержит:
 
 ```text
 id
@@ -319,1147 +71,1495 @@ created_at
 updated_at
 ```
 
-### id
+`passwordHash` уже имеет:
 
-Использовать обычный generated integer primary key.
+```ts
+select: false;
+```
 
-Не вводить UUID без необходимости.
+Это нужно сохранить.
+
+Пароль в plaintext никогда не должен попадать в БД.
 
 ---
 
-### email
+# 3. Цель этапа
+
+После завершения backend должен поддерживать:
 
 ```text
-NOT NULL
-UNIQUE
+POST /auth/register
+POST /auth/login
+POST /auth/logout
+GET  /auth/current
 ```
 
-Максимальная разумная длина:
+Полный flow:
 
 ```text
-320
+Register
+↓
+validate DTO
+↓
+normalize email
+↓
+hash password
+↓
+save User
+↓
+generate JWT
+↓
+set HttpOnly cookie
+↓
+return public User
+```
+
+Login:
+
+```text
+email + password
+↓
+find User including passwordHash
+↓
+verify password
+↓
+generate JWT
+↓
+set HttpOnly cookie
+↓
+return public User
+```
+
+Protected request:
+
+```text
+HTTP request
+↓
+HttpOnly JWT cookie
+↓
+JwtAuthGuard
+↓
+verify JWT
+↓
+extract userId
+↓
+protected endpoint
+```
+
+Logout:
+
+```text
+POST /auth/logout
+↓
+clear authentication cookie
 ```
 
 ---
 
-### passwordHash
+# 4. Принятая стратегия Authentication
 
-В TypeScript property:
+Используем:
+
+```text
+JWT
++
+HttpOnly cookie
+```
+
+JWT НЕ должен возвращаться frontend как значение, которое нужно сохранять вручную.
+
+Не использовать:
+
+```text
+localStorage
+sessionStorage
+```
+
+для access token.
+
+Browser должен получать cookie через HTTP response.
+
+---
+
+# 5. Почему cookie
+
+Cookie должна иметь:
+
+```text
+httpOnly: true
+sameSite: 'lax'
+path: '/'
+```
+
+В development:
+
+```text
+secure: false
+```
+
+В production:
+
+```text
+secure: true
+```
+
+JavaScript frontend не должен иметь возможность читать access token.
+
+---
+
+# 6. Ограничения текущей auth-системы
+
+На этом этапе используем только один access JWT.
+
+НЕ реализовывать сейчас:
+
+```text
+refresh tokens
+refresh token rotation
+token blacklist
+session table
+OAuth
+Google Login
+GitHub Login
+email verification
+forgot password
+reset password
+2FA
+roles
+permissions
+Passport
+```
+
+Logout в текущей stateless JWT-схеме очищает browser cookie.
+
+Он не делает server-side revocation уже выпущенного JWT.
+
+Это осознанное ограничение MVP.
+
+---
+
+# 7. JWT payload
+
+JWT должен содержать минимальные данные.
+
+Например:
+
+```ts
+interface JwtPayload {
+  sub: number;
+}
+```
+
+где:
+
+```text
+sub = User.id
+```
+
+Не помещать в JWT:
+
+```text
+passwordHash
+Recipe data
+profile object
+лишние пользовательские данные
+```
+
+PostgreSQL остаётся source of truth для пользовательских данных.
+
+---
+
+# 8. Планируемая структура
+
+Предпочтительно:
+
+```text
+src/
+├── auth/
+│   ├── decorators/
+│   │   ├── current-user.decorator.ts
+│   │   └── public.decorator.ts
+│   │
+│   ├── dto/
+│   │   ├── login.dto.ts
+│   │   └── register.dto.ts
+│   │
+│   ├── guards/
+│   │   └── jwt-auth.guard.ts
+│   │
+│   ├── types/
+│   │   ├── authenticated-user.type.ts
+│   │   └── jwt-payload.type.ts
+│   │
+│   ├── auth.constants.ts
+│   ├── auth.controller.ts
+│   ├── auth.module.ts
+│   └── auth.service.ts
+│
+└── users/
+    ├── entities/
+    │   └── user.entity.ts
+    ├── users.module.ts
+    └── users.service.ts
+```
+
+Не создавать дополнительные abstraction layers без необходимости.
+
+Если текущий проект требует чуть другую структуру — сначала объясни причину.
+
+---
+
+# 9. Как со мной работать
+
+Не реализовывай весь этап одним огромным изменением.
+
+Работаем логическими блоками.
+
+Перед каждым блоком напиши:
+
+## Что делаем
+
+## Почему
+
+## Какие файлы будут изменены
+
+## Что нужно установить или запустить
+
+Если нужна новая dependency:
+
+1. сначала покажи мне команду;
+2. объясни, зачем пакет нужен;
+3. я сама выполню установку;
+4. после моего подтверждения продолжай.
+
+Не устанавливай пакеты молча.
+
+После каждого крупного блока:
+
+- запускай или проси меня запустить проверки;
+- анализируй результат;
+- обновляй `apps/codex/AGENT_PROGRESS.md`.
+
+Не создавай commit без моего отдельного запроса.
+
+---
+
+# Step 1 — Audit перед Auth
+
+Сначала ничего не меняй.
+
+Изучи:
+
+```text
+apps/backend/package.json
+apps/backend/src/app.module.ts
+apps/backend/src/main.ts
+apps/backend/src/users/users.module.ts
+apps/backend/src/users/entities/user.entity.ts
+apps/backend/.env.example
+```
+
+Проверь:
+
+- какие auth-related packages уже установлены;
+- есть ли `class-validator`;
+- есть ли `class-transformer`;
+- как настроен ValidationPipe;
+- как настроен ConfigModule;
+- как сейчас работает CORS;
+- как зарегистрирован `User`;
+- какие особенности текущей версии TypeORM нужно учитывать.
+
+После аудита покажи:
+
+```text
+что уже есть
+что нужно добавить
+какие dependencies нужны
+```
+
+И остановись.
+
+---
+
+# Step 2 — Dependencies
+
+Ожидаемо понадобятся:
+
+```text
+@nestjs/jwt
+argon2
+cookie-parser
+class-validator
+class-transformer
+```
+
+Dev dependency:
+
+```text
+@types/cookie-parser
+```
+
+Но перед установкой обязательно проверь фактический `package.json`.
+
+---
+
+## Почему Argon2
+
+Для нового проекта использовать современное password hashing решение.
+
+Использовать:
+
+```text
+Argon2id
+```
+
+Не писать собственную криптографию.
+
+Не использовать:
+
+```text
+SHA256(password)
+MD5
+encrypt(password)
+```
+
+Argon2 должен сам хранить необходимые salt/parameters внутри результата hash.
+
+---
+
+# Step 3 — Environment configuration
+
+Добавить в:
+
+```text
+apps/backend/.env.example
+```
+
+необходимые переменные.
+
+Например:
+
+```text
+JWT_SECRET=
+JWT_EXPIRES_IN_SECONDS=86400
+NODE_ENV=development
+```
+
+Реальный `.env` также должен быть обновлён локально, но НЕ попадать в Git.
+
+`JWT_SECRET`:
+
+- не хардкодить;
+- не хранить в source code;
+- не использовать короткий `secret`;
+- `.env.example` должен содержать placeholder, а не настоящий secret.
+
+Приложение должно падать при старте, если обязательный `JWT_SECRET` отсутствует.
+
+Не добавлять десятки auth environment variables без необходимости.
+
+---
+
+# Step 4 — UsersService
+
+Сейчас `UsersModule` содержит только Entity registration.
+
+Добавить:
+
+```text
+users.service.ts
+```
+
+`UsersService` должен быть persistence boundary для User.
+
+Использовать стандартный TypeORM:
+
+```ts
+Repository<User>;
+```
+
+через dependency injection.
+
+Не создавать custom repository wrapper без необходимости.
+
+---
+
+## UsersService должен поддерживать
+
+Минимум:
+
+```text
+findById()
+findByEmail()
+findByEmailWithPassword()
+create()
+```
+
+Точные имена можно немного изменить, если есть хороший reason.
+
+---
+
+## Важный момент passwordHash
+
+Поскольку:
 
 ```ts
 passwordHash;
 ```
 
-В PostgreSQL:
+имеет:
+
+```ts
+select: false;
+```
+
+обычный query НЕ должен возвращать hash.
+
+Только специальный login-query должен явно запросить его.
+
+То есть:
+
+```text
+обычные user queries
+→ passwordHash отсутствует
+
+login query
+→ passwordHash явно включён
+```
+
+---
+
+# Step 5 — Email normalization
+
+Перед сохранением и поиском email должен быть нормализован.
+
+Минимум:
+
+```text
+trim
+lowercase
+```
+
+Например:
+
+```text
+  TEST@Example.COM
+```
+
+↓
+
+```text
+test@example.com
+```
+
+Не изменять пароль через `trim()` или `lowercase`.
+
+Пароль пользователя должен хешироваться ровно в том виде, в котором он был введён.
+
+---
+
+# Step 6 — RegisterDto
+
+Создать:
+
+```text
+RegisterDto
+```
+
+Поля:
+
+```ts
+email;
+password;
+name;
+```
+
+`language` пока НЕ нужно принимать при регистрации.
+
+Database default:
+
+```text
+en
+```
+
+достаточен.
+
+---
+
+## Validation
+
+Для email:
+
+```text
+валидный email
+max length 320
+```
+
+Для name:
+
+```text
+string
+не пустой
+разумная max length <= 120
+```
+
+Для password:
+
+```text
+string
+minimum length 8
+maximum length 128
+```
+
+Не вводить бессмысленные требования:
+
+```text
+обязательно 1 uppercase
+обязательно 1 number
+обязательно 1 special character
+```
+
+если это не является product requirement.
+
+Global ValidationPipe уже настроен:
+
+```text
+whitelist
+transform
+forbidNonWhitelisted
+```
+
+Использовать существующую конфигурацию.
+
+---
+
+# Step 7 — LoginDto
+
+Создать:
+
+```text
+LoginDto
+```
+
+Поля:
+
+```ts
+email;
+password;
+```
+
+Валидировать типы и разумные ограничения.
+
+Не принимать:
+
+```text
+name
+language
+id
+role
+```
+
+---
+
+# Step 8 — Password hashing
+
+При регистрации:
+
+```text
+plain password
+↓
+Argon2id
+↓
+passwordHash
+↓
+PostgreSQL
+```
+
+В БД должно сохраняться только:
 
 ```text
 password_hash
 ```
 
-Поле:
+Plain password:
 
-```text
-NOT NULL
-```
-
-Рекомендуется исключить его из обычных SELECT через возможности TypeORM, чтобы password hash случайно не возвращался вместе с User.
-
-На этапе Auth позже мы будем запрашивать его явно там, где это действительно необходимо.
-
-Никакого password hashing сейчас не реализовывать.
+- не логировать;
+- не сохранять;
+- не возвращать;
+- не помещать в JWT.
 
 ---
 
-### name
+# Step 9 — Duplicate email
+
+Регистрация второго пользователя с тем же normalized email должна возвращать:
 
 ```text
-NOT NULL
+409 Conflict
 ```
 
-Обычная строка разумной длины.
+Например:
+
+```text
+test@example.com
+TEST@example.com
+```
+
+должны считаться одним email благодаря normalization.
+
+Можно предварительно проверить существование пользователя для понятного response.
+
+Но нужно учитывать race condition:
+
+```text
+request A
+request B
+```
+
+поэтому database UNIQUE constraint остаётся последней гарантией.
+
+Если PostgreSQL возвращает unique violation:
+
+```text
+23505
+```
+
+она должна быть корректно преобразована в понятный `409 Conflict`.
+
+Не отдавать пользователю raw PostgreSQL error.
 
 ---
 
-### language
+# Step 10 — AuthService: Register
 
-Пока:
-
-```text
-language
-```
-
-с дефолтным значением:
+Создать:
 
 ```text
-en
+AuthService
 ```
 
-Не нужно сейчас делать отдельную таблицу Languages.
-
-Не нужно создавать сложную локализационную модель.
-
-Можно хранить language code простой строкой.
-
-Начальные будущие значения:
+Register flow:
 
 ```text
-en
-ru
+RegisterDto
+↓
+normalize email
+↓
+проверить duplicate
+↓
+hash password
+↓
+UsersService.create()
+↓
+создать JWT
+↓
+вернуть controller:
+    public user
+    token для установки cookie
 ```
 
-Но логика i18n будет реализована позже.
+AuthService не должен самостоятельно писать HTTP cookie.
+
+Cookie — HTTP concern, поэтому устанавливать её должен controller.
 
 ---
 
-### timestamps
+# Step 11 — Public User
 
-Использовать:
+Никогда не возвращать User Entity автоматически наружу.
 
-```text
-created_at
-updated_at
-```
+Создать понятный public representation пользователя.
 
-Хранить timezone-aware timestamps для PostgreSQL, если это нормально поддерживается текущим TypeORM setup.
+Ответ должен содержать примерно:
 
----
-
-# Step 4 — RecipeStatus и Recipe Entity
-
-Создай:
-
-```text
-src/recipes/
-├── entities/
-├── enums/
-└── recipes.module.ts
-```
-
-Пока без service/controller.
-
----
-
-## RecipeStatus
-
-Создай enum:
-
-```ts
-enum RecipeStatus {
-  PENDING = "pending",
-  PROCESSING = "processing",
-  COMPLETED = "completed",
-  FAILED = "failed",
+```json
+{
+  "id": 1,
+  "email": "user@example.com",
+  "name": "Kamilla",
+  "language": "en"
 }
 ```
 
-Recipe по умолчанию должен создаваться со статусом:
+Не возвращать:
 
 ```text
-pending
+passwordHash
+JWT
+internal DB metadata без необходимости
 ```
+
+Можно создать отдельный response type/DTO.
+
+Не создавать огромную mapping infrastructure.
+
+Одна простая явная функция mapping допустима.
 
 ---
 
-# Recipe Entity
+# Step 12 — AuthService: Login
 
-Таблица:
-
-```text
-recipes
-```
-
-Поля:
+Login flow:
 
 ```text
-id
-
-title
-description
-
-source_url
-image_url
-
-servings
-prep_time_minutes
-cook_time_minutes
-
-status
-error_message
-
-user_id
-
-created_at
-updated_at
+email
+password
+↓
+normalize email
+↓
+findByEmailWithPassword()
+↓
+argon2.verify()
+↓
+generate JWT
+↓
+return public user + internal token
 ```
 
----
-
-## id
-
-Generated integer primary key.
-
----
-
-## title
+Если email не существует:
 
 ```text
-nullable
+401 Unauthorized
 ```
 
-Потому что Recipe будет создаваться до завершения parser-а.
-
-Разумная максимальная длина строки.
-
----
-
-## description
+Если password неправильный:
 
 ```text
-text
-nullable
+401 Unauthorized
 ```
 
----
-
-## sourceUrl
-
-TypeScript:
-
-```ts
-sourceUrl;
-```
-
-PostgreSQL:
-
-```text
-source_url
-```
-
-Поле:
-
-```text
-NOT NULL
-```
-
-Использовать `text`, потому что URL теоретически может быть длинным.
-
-Не добавлять UNIQUE constraint.
-
-Один и тот же URL теоретически может быть импортирован несколько раз.
-
----
-
-## imageUrl
-
-```text
-image_url
-text
-nullable
-```
-
----
-
-## servings
-
-```text
-integer
-nullable
-```
-
----
-
-## prepTimeMinutes
-
-PostgreSQL:
-
-```text
-prep_time_minutes
-```
-
-```text
-integer
-nullable
-```
-
----
-
-## cookTimeMinutes
-
-PostgreSQL:
-
-```text
-cook_time_minutes
-```
-
-```text
-integer
-nullable
-```
-
----
-
-## status
-
-Использовать `RecipeStatus`.
-
-```text
-NOT NULL
-DEFAULT pending
-```
-
----
-
-## errorMessage
-
-PostgreSQL:
-
-```text
-error_message
-```
-
-```text
-text
-nullable
-```
-
----
-
-## userId
-
-Recipe должен всегда принадлежать User.
-
-TypeScript должен иметь удобный scalar foreign key:
-
-```ts
-userId: number;
-```
-
-и relation:
-
-```ts
-user: User;
-```
-
-Оба должны использовать одну колонку:
-
-```text
-user_id
-```
-
-Связь:
-
-```text
-User 1:N Recipe
-```
-
-Foreign key:
-
-```text
-recipes.user_id
-→ users.id
-```
-
-При удалении User:
-
-```text
-ON DELETE CASCADE
-```
-
-потому что в текущей продуктовой модели Recipes принадлежат конкретному User.
-
-Не использовать ORM `cascade: true` просто ради автоматического save.
-
----
-
-## Index
-
-Добавить индекс на:
-
-```text
-recipes.user_id
-```
-
-Потому что основной query pattern приложения:
-
-```text
-получить Recipes конкретного User
-```
-
-Не добавлять десятки speculative indexes.
-
----
-
-# Step 5 — RecipeIngredient Entity
-
-Создай:
-
-```text
-recipe-ingredient.entity.ts
-```
-
-Таблица:
-
-```text
-recipe_ingredients
-```
-
-Поля:
-
-```text
-id
-raw_text
-name
-quantity
-unit
-position
-recipe_id
-```
-
----
-
-## rawText
-
-TypeScript:
-
-```ts
-rawText;
-```
-
-DB:
-
-```text
-raw_text
-```
-
-```text
-text
-NOT NULL
-```
-
-Это оригинальная строка ингредиента.
+Сообщение должно быть одинаковым.
 
 Например:
 
 ```text
-½ - 1 tsp chilli flakes
+Invalid email or password
 ```
 
-Её нельзя терять даже если структурированные поля определить не удалось.
-
----
-
-## name
+Не выдавать:
 
 ```text
-nullable
-```
-
-Разумная строковая длина.
-
----
-
-## quantity
-
-```text
-nullable
-```
-
-Количество должно поддерживать дробные значения:
-
-```text
-0.5
-1.5
-2.25
-```
-
-Выбери PostgreSQL/TypeORM тип, который нормально отображается в JavaScript `number`.
-
-Не создавай сложный decimal transformer без реальной необходимости.
-
-Для количества ингредиентов достаточно обычного floating-point numeric representation.
-
----
-
-## unit
-
-```text
-nullable
-```
-
-Разумная короткая строка.
-
-Например:
-
-```text
-g
-kg
-ml
-tbsp
-tsp
-```
-
----
-
-## position
-
-```text
-integer
-NOT NULL
-```
-
-Порядок ингредиентов должен храниться явно.
-
-Нельзя рассчитывать на порядок primary key.
-
----
-
-## recipeId
-
-TypeScript:
-
-```ts
-recipeId: number;
-```
-
-Relation:
-
-```ts
-recipe: Recipe;
-```
-
-Оба используют:
-
-```text
-recipe_id
-```
-
-Foreign key:
-
-```text
-recipe_ingredients.recipe_id
-→ recipes.id
-ON DELETE CASCADE
-```
-
----
-
-## Unique constraint
-
-Обязательно:
-
-```text
-UNIQUE(recipe_id, position)
-```
-
-У одного Recipe не должно существовать двух ингредиентов с одинаковой позицией.
-
-Отдельный index только на `recipe_id` не нужен, если composite unique index уже эффективно начинается с `recipe_id`.
-
-Не создавать дублирующие индексы.
-
----
-
-# Step 6 — RecipeStep Entity
-
-Создай:
-
-```text
-recipe-step.entity.ts
-```
-
-Таблица:
-
-```text
-recipe_steps
-```
-
-Поля:
-
-```text
-id
-text
-group_name
-duration_minutes
-image_url
-position
-recipe_id
-```
-
----
-
-## text
-
-```text
-text
-NOT NULL
-```
-
----
-
-## group
-
-В TypeScript property оставить:
-
-```ts
-group: string | null;
-```
-
-В PostgreSQL лучше использовать понятное имя:
-
-```text
-group_name
-```
-
-чтобы не использовать потенциально неоднозначное SQL-имя `group`.
-
-Поле nullable.
-
-Пример:
-
-```text
-For the chicken
-For the sauce
-```
-
-Если группировки нет:
-
-```text
-null
-```
-
----
-
-## durationMinutes
-
-PostgreSQL:
-
-```text
-duration_minutes
-```
-
-```text
-integer
-nullable
-```
-
----
-
-## imageUrl
-
-PostgreSQL:
-
-```text
-image_url
-```
-
-```text
-text
-nullable
-```
-
----
-
-## position
-
-```text
-integer
-NOT NULL
-```
-
----
-
-## recipeId
-
-TypeScript:
-
-```ts
-recipeId: number;
-```
-
-Relation:
-
-```ts
-recipe: Recipe;
-```
-
-DB:
-
-```text
-recipe_id
-```
-
-Foreign key:
-
-```text
-recipe_steps.recipe_id
-→ recipes.id
-ON DELETE CASCADE
-```
-
----
-
-## Unique constraint
-
-Добавить:
-
-```text
-UNIQUE(recipe_id, position)
-```
-
----
-
-# Step 7 — обратные relations
-
-Entity должны иметь двусторонние relations.
-
-Концептуально:
-
-```text
-User
-└── recipes: Recipe[]
-
-Recipe
-├── user: User
-├── ingredients: RecipeIngredient[]
-└── steps: RecipeStep[]
-
-RecipeIngredient
-└── recipe: Recipe
-
-RecipeStep
-└── recipe: Recipe
-```
-
-Не включать:
-
-```ts
-cascade: true;
-```
-
-на всех `OneToMany`.
-
-Сохранение связанных Entity позже должно быть осознанной частью service/business logic.
-
-Удаление children обеспечивается через database:
-
-```text
-ON DELETE CASCADE
-```
-
-на owning-side foreign keys.
-
----
-
-# Step 8 — регистрация Entity
-
-Текущий backend использует:
-
-```ts
-autoLoadEntities: true;
-```
-
-Поэтому зарегистрируй Entity через соответствующие Nest modules.
-
-Например:
-
-```text
-UsersModule
-→ TypeOrmModule.forFeature([User])
-
-RecipesModule
-→ TypeOrmModule.forFeature([
-     Recipe,
-     RecipeIngredient,
-     RecipeStep,
-   ])
-```
-
-После этого подключи эти modules в `AppModule`.
-
-Не создавать services/controllers только для того, чтобы module выглядел заполненным.
-
----
-
-# Step 9 — Initial migration
-
-После того как Entity готовы:
-
-1. убедись, что PostgreSQL запущен;
-2. проверь, что dev database находится в ожидаемом состоянии;
-3. не удаляй существующие данные без моего разрешения;
-4. сгенерируй initial migration на основе Entity.
-
-Имя migration должно быть понятным, например:
-
-```text
-CreateInitialSchema
+Email does not exist
 ```
 
 или:
 
 ```text
-InitialDatabaseSchema
+Password is incorrect
 ```
 
-После генерации обязательно открой migration и вручную проверь SQL.
-
-Нельзя просто довериться TypeORM generator.
+чтобы login endpoint не помогал определять существование аккаунтов.
 
 ---
 
-# 10. Что должна создавать migration
+# Step 13 — JWT configuration
 
-Ожидаемые таблицы:
-
-```text
-users
-recipes
-recipe_ingredients
-recipe_steps
-migrations
-```
-
-`migrations` — служебная таблица TypeORM после выполнения migrations.
-
----
-
-## users
-
-Ожидается:
+Подключить:
 
 ```text
-PK id
-UNIQUE email
-password_hash
-name
-language
-created_at
-updated_at
+JwtModule
 ```
 
----
+через ConfigService.
 
-## recipes
-
-Ожидается:
+JWT должен:
 
 ```text
-PK id
-
-nullable title
-nullable description
-
-source_url NOT NULL
-image_url nullable
-
-servings nullable
-prep_time_minutes nullable
-cook_time_minutes nullable
-
-status NOT NULL
-error_message nullable
-
-user_id NOT NULL
-
-created_at
-updated_at
-
-FK user_id → users.id
-ON DELETE CASCADE
+использовать JWT_SECRET
+иметь expiration
 ```
 
-Плюс индекс по:
-
-```text
-user_id
-```
-
----
-
-## recipe_ingredients
-
-Ожидается:
-
-```text
-PK id
-raw_text
-name
-quantity
-unit
-position
-recipe_id
-
-FK recipe_id → recipes.id
-ON DELETE CASCADE
-
-UNIQUE(recipe_id, position)
-```
-
----
-
-## recipe_steps
-
-Ожидается:
-
-```text
-PK id
-text
-group_name
-duration_minutes
-image_url
-position
-recipe_id
-
-FK recipe_id → recipes.id
-ON DELETE CASCADE
-
-UNIQUE(recipe_id, position)
-```
-
----
-
-# Step 11 — проверить migration lifecycle
-
-Нужно доказать, что migration infrastructure реально работает.
-
-Проверить:
-
-```text
-migration:show
-migration:run
-```
-
-После `migration:run` проверить PostgreSQL schema.
-
-Не ограничиваться сообщением CLI:
-
-```text
-Migration executed successfully
-```
-
-Посмотреть реальные таблицы, foreign keys и constraints через PostgreSQL.
-
-После этого, если это безопасно для текущей локальной dev database:
-
-```text
-migration:revert
-```
-
-Проверить, что migration откатилась корректно.
-
-Затем снова:
-
-```text
-migration:run
-```
-
-чтобы финальное состояние БД снова соответствовало Entity.
-
-Не оставлять базу в reverted состоянии.
-
----
-
-# Step 12 — объяснить SQL-модель
-
-После создания migration коротко объясни мне, какой SQL concept стоит за каждым TypeORM relation.
-
-Особенно:
-
-```text
-@ManyToOne
-@OneToMany
-@JoinColumn
-@Unique
-@Index
-onDelete: 'CASCADE'
-```
-
-Мне нужно понимать не только TypeORM decorators, но и итоговую PostgreSQL-модель.
-
-Не делай длинную лекцию.
-
-Покажи связь:
-
-```text
-TypeORM
-→ какой FK/index/constraint появляется в PostgreSQL
-```
-
----
-
-# 13. На что обратить особое внимание
-
-## Entity != DTO
-
-На этом этапе DTO вообще не нужны.
-
-Не создавай DTO только потому, что позже будет API.
-
----
-
-## Entity != ParsedRecipe
-
-Database Entity и результат parser-а — разные модели.
-
-Не добавлять parser-specific типы в Entity.
+Expiration брать из env.
 
 Например:
 
 ```text
-Recipe
+JWT_EXPIRES_IN_SECONDS=86400
 ```
 
-может содержать:
+JWT payload:
+
+```ts
+{
+  sub: user.id;
+}
+```
+
+Не добавлять refresh token.
+
+---
+
+# Step 14 — Authentication cookie
+
+Создать понятное имя cookie.
+
+Например:
 
 ```text
-id
-status
+dishly_access_token
+```
+
+Не использовать слишком общее:
+
+```text
+token
+```
+
+Cookie options:
+
+```ts
+httpOnly: true;
+sameSite: "lax";
+path: "/";
+secure: NODE_ENV === "production";
+```
+
+Expiration cookie должна соответствовать expiration JWT.
+
+Не дублировать значение `86400` в нескольких местах.
+
+---
+
+# Step 15 — AuthController
+
+Создать:
+
+```text
+POST /auth/register
+POST /auth/login
+POST /auth/logout
+GET  /auth/current
+```
+
+---
+
+## POST /auth/register
+
+Получает:
+
+```json
+{
+  "email": "...",
+  "password": "...",
+  "name": "..."
+}
+```
+
+Успех:
+
+```text
+201 Created
+```
+
+Устанавливает HttpOnly auth cookie.
+
+Возвращает public user.
+
+Регистрация автоматически авторизует пользователя.
+
+---
+
+## POST /auth/login
+
+Успех:
+
+```text
+200 OK
+```
+
+Устанавливает HttpOnly auth cookie.
+
+Возвращает public user.
+
+---
+
+## POST /auth/logout
+
+Должен быть idempotent.
+
+Если cookie существует:
+
+```text
+clear cookie
+```
+
+Если cookie уже нет:
+
+всё равно вернуть успешный response.
+
+Предпочтительно:
+
+```text
+204 No Content
+```
+
+Logout endpoint можно оставить public, чтобы клиент всегда мог очистить локальную auth cookie.
+
+При очистке cookie использовать совместимые:
+
+```text
+path
+sameSite
+secure
+```
+
+options.
+
+---
+
+## GET /auth/current
+
+Protected endpoint.
+
+JWT:
+
+```text
+sub
+↓
 userId
-errorMessage
-createdAt
+↓
+UsersService.findById()
+↓
+public user
 ```
 
-а parser позже будет возвращать отдельный:
+Не возвращать данные только из JWT.
 
-```text
-ParsedRecipe
-```
+User Entity/PostgreSQL остаётся source of truth.
 
-без database-specific полей.
+Если User больше не существует:
 
-Сам `ParsedRecipe` пока не требуется реализовывать на этом этапе.
+возвращать корректный authentication error.
 
 ---
 
-## Не использовать eager relations
+# Step 16 — cookie-parser
 
-Не добавлять:
+Подключить `cookie-parser` в:
+
+```text
+main.ts
+```
+
+JwtAuthGuard должен читать JWT из auth cookie.
+
+Не искать token в:
+
+```text
+query string
+request body
+localStorage
+```
+
+---
+
+# Step 17 — CORS
+
+Поскольку frontend позже должен отправлять cookie:
+
+текущий CORS нужно обновить.
+
+Сохранить конкретный:
+
+```text
+origin: FRONTEND_URL
+```
+
+и добавить:
 
 ```ts
-eager: true;
+credentials: true;
 ```
 
-без реальной необходимости.
-
-Позже service сам определит, какие relations нужны конкретному query.
-
----
-
-## Не использовать ORM cascade save без причины
-
-Не ставить:
+Не использовать:
 
 ```ts
-cascade: true;
+origin: "*";
 ```
 
-просто чтобы TypeORM автоматически сохранял всё дерево.
+вместе с credentials.
 
-Мы хотим явно понимать операции записи.
+Frontend менять на этом этапе НЕ нужно.
+
+Позже frontend будет использовать:
+
+```text
+credentials: 'include'
+```
+
+при API requests.
 
 ---
 
-## Не использовать synchronize
+# Step 18 — JwtAuthGuard
 
-Оставить:
+Создать custom NestJS guard.
+
+Не подключать Passport только ради одной JWT strategy.
+
+Guard должен:
+
+```text
+1. определить, public ли route
+2. получить JWT из cookie
+3. проверить signature
+4. проверить expiration
+5. проверить payload
+6. положить authenticated user info в request
+```
+
+Минимальная информация:
 
 ```ts
-synchronize: false;
+{
+  id: payload.sub;
+}
+```
+
+Если cookie отсутствует:
+
+```text
+401 Unauthorized
+```
+
+Если JWT invalid:
+
+```text
+401 Unauthorized
+```
+
+Если JWT expired:
+
+```text
+401 Unauthorized
+```
+
+Не отдавать пользователю внутренние JWT errors.
+
+---
+
+# Step 19 — Auth по умолчанию
+
+Поскольку большая часть будущего Dishly будет приватной:
+
+```text
+Recipes
+Profile
+Imports
+```
+
+предпочтительно сделать authentication guard глобальным.
+
+Использовать secure-by-default подход:
+
+```text
+все endpoints protected
+↓
+явно отмечаем public endpoints
+```
+
+Например custom decorator:
+
+```ts
+@Public()
 ```
 
 ---
 
-## Не добавлять timestamps всем Entity без необходимости
+# Step 20 — Public endpoints
 
-`createdAt` / `updatedAt` нужны для:
-
-```text
-User
-Recipe
-```
-
-Для:
+На текущем этапе public должны быть:
 
 ```text
-RecipeIngredient
-RecipeStep
+GET  /health
+
+POST /auth/register
+POST /auth/login
+POST /auth/logout
 ```
 
-пока они не нужны.
+Protected:
+
+```text
+GET /auth/current
+```
+
+После подключения global guard обязательно убедиться, что существующий:
+
+```text
+GET /health
+```
+
+не сломался.
 
 ---
 
-# 14. Что НЕ входит в Этап 2
+# Step 21 — @CurrentUser decorator
 
-Категорически не реализовывать сейчас:
+Не обращаться в каждом controller к:
+
+```ts
+request.user;
+```
+
+вручную.
+
+Создать небольшой:
+
+```ts
+@CurrentUser()
+```
+
+decorator.
+
+Например controller должен выглядеть концептуально:
+
+```ts
+getMe(@CurrentUser() user: AuthenticatedUser)
+```
+
+а не содержать разбор Express request.
+
+Не помещать business logic в decorator.
+
+---
+
+# Step 22 — Module structure
+
+Ожидаемо:
 
 ```text
-AuthService
+AuthModule
+```
+
+должен:
+
+```text
+import UsersModule
+configure JwtModule
+provide AuthService
+provide AuthGuard
+expose AuthController
+```
+
+`UsersModule` должен:
+
+```text
+TypeOrmModule.forFeature([User])
+provide UsersService
+export UsersService
+```
+
+Не создавать circular dependencies.
+
+---
+
+# Step 23 — Что НЕ должно быть в Controller
+
+Плохо:
+
+```text
 AuthController
-JWT
-bcrypt/argon
-RegisterDto
-LoginDto
-
-RecipesController
-RecipesService
-Recipe CRUD
-
-BullMQ
-queue
-worker
-
-HTML fetch
-JSON-LD
-Good Food parser
-
-frontend changes
-i18next
-profile UI
-shopping list
-AI
+↓
+Repository
+↓
+SQL
 ```
 
-Следующий этап будет:
+или:
 
 ```text
-Этап 3 — Backend Authentication
+AuthController
+↓
+argon2.hash()
 ```
 
-Но к нему не переходить автоматически.
+Controller отвечает за:
+
+```text
+HTTP input
+↓
+AuthService
+↓
+HTTP response / cookie
+```
+
+Business logic находится в service.
 
 ---
 
-# 15. Проверки перед завершением
+# Step 24 — Security checks
 
-Обязательно выполнить:
+Обязательно проверить:
+
+### Password
+
+```text
+не хранится plaintext
+не возвращается
+не логируется
+```
+
+### passwordHash
+
+```text
+не возвращается через API
+обычные User queries его не выбирают
+```
+
+### JWT
+
+```text
+не возвращается в response body
+не логируется
+не хранится в source code
+```
+
+### Cookie
+
+```text
+HttpOnly
+SameSite=Lax
+Path=/
+Secure в production
+```
+
+### Login error
+
+Одинаковый response для:
+
+```text
+unknown email
+wrong password
+```
+
+---
+
+# Step 25 — CSRF scope
+
+Сейчас НЕ добавлять отдельную CSRF library или token mechanism.
+
+Для текущего MVP предполагаем:
+
+```text
+frontend и backend остаются same-site
+```
+
+и используем:
+
+```text
+SameSite=Lax
+```
+
+Но зафиксировать архитектурное правило:
+
+если production deployment позже потребует:
+
+```text
+SameSite=None
+```
+
+или frontend/backend окажутся truly cross-site,
+
+нужно отдельно пересмотреть CSRF protection.
+
+Не усложнять это сейчас.
+
+---
+
+# Step 26 — Tests
+
+Добавить focused tests для важной auth logic.
+
+Не писать десятки тестов ради coverage.
+
+Минимально проверить:
+
+### Registration
+
+```text
+создаёт User
+password hash != plain password
+duplicate email → conflict
+```
+
+### Login
+
+```text
+correct credentials → success
+wrong password → unauthorized
+unknown email → unauthorized
+```
+
+### JWT Guard
+
+```text
+valid token → pass
+missing token → 401
+invalid token → 401
+expired token → 401
+public endpoint → pass
+```
+
+Если unit test конкретного infrastructure behavior получается искусственным и бессмысленным — объясни и не создавай его только ради количества.
+
+---
+
+# Step 27 — Manual end-to-end verification
+
+После implementation проверить настоящий API.
+
+Использовать curl с cookie jar.
+
+Проверить последовательность:
+
+```text
+1. register
+2. cookie получена
+3. GET /auth/current работает
+4. logout
+5. GET /auth/current возвращает 401
+6. login
+7. GET /auth/current снова работает
+```
+
+---
+
+## Дополнительно проверить
+
+### Invalid DTO
+
+Например extra field:
+
+```json
+{
+  "email": "...",
+  "password": "...",
+  "name": "...",
+  "isAdmin": true
+}
+```
+
+должен быть отклонён существующим:
+
+```text
+forbidNonWhitelisted
+```
+
+---
+
+### Duplicate email
+
+```text
+test@example.com
+TEST@example.com
+```
+
+не должны создать два аккаунта.
+
+---
+
+### Wrong password
+
+```text
+401
+```
+
+---
+
+### Health
+
+Без authentication:
+
+```text
+GET /health
+→ 200
+```
+
+---
+
+# Step 28 — Проверить PostgreSQL
+
+После тестовой регистрации проверить непосредственно БД.
+
+Убедиться:
+
+```text
+email нормализован
+password_hash существует
+password_hash != plain password
+```
+
+Hash должен быть Argon2, а не простой hash вроде SHA-256.
+
+Не выводить реальный пароль в AGENT_PROGRESS или логи.
+
+---
+
+# Step 29 — README / environment docs
+
+Обновить документацию только настолько, насколько нужно для нового auth setup.
+
+Добавить обязательные env:
+
+```text
+JWT_SECRET
+JWT_EXPIRES_IN_SECONDS
+NODE_ENV
+```
+
+Коротко описать auth endpoints.
+
+Не превращать README в огромную API документацию.
+
+Swagger пока НЕ добавлять.
+
+---
+
+# Step 30 — Database schema
+
+Этап Authentication НЕ должен требовать изменения текущей database schema.
+
+Не менять без необходимости:
+
+```text
+User Entity
+Recipe Entity
+migrations
+```
+
+`users.password_hash` уже существует.
+
+Не создавать новую migration, если schema реально не изменилась.
+
+Если обнаружится реальная необходимость изменить schema:
+
+1. остановись;
+2. объясни причину;
+3. не редактируй initial migration после того, как она уже была применена;
+4. schema change должен идти новой migration.
+
+---
+
+# Step 31 — Финальные проверки
+
+Перед завершением обязательно:
 
 ```bash
 npm run build
 npm run lint
+npm test
+npm run migration:show
 ```
 
-из:
-
-```text
-apps/backend
-```
-
-Проверить TypeORM migration commands.
-
-Проверить:
+Также:
 
 ```bash
 docker compose ps
 ```
 
-из root проекта.
-
-PostgreSQL должен быть healthy.
-
-Проверить migration status.
-
-Проверить database schema.
+PostgreSQL должен оставаться healthy.
 
 Проверить:
 
@@ -1468,118 +1568,189 @@ git status
 git diff
 ```
 
-Не создавать commit без моего запроса.
+---
+
+# Step 32 — Scope control
+
+На Этапе 3 НЕ реализовывать:
+
+```text
+Recipe CRUD
+RecipeService
+RecipesController
+
+BullMQ
+Redis integration
+queue jobs
+worker
+
+Good Food parser
+HTML fetch
+JSON-LD
+
+frontend login page
+frontend register page
+protected React routes
+
+i18next
+profile editing
+shopping list
+AI
+```
+
+Frontend Authentication будет отдельным более поздним этапом.
+
+Сейчас проверяем backend через curl/tests.
 
 ---
 
-# 16. Definition of Done
+# Step 33 — Definition of Done
 
-Этап 2 считается готовым только если:
+Этап 3 готов только если:
 
 ```text
-[ ] migration infrastructure настроена
+[ ] UsersService реализован
 
-[ ] synchronize остаётся false
+[ ] RegisterDto существует
+[ ] LoginDto существует
 
-[ ] TypeORM DataSource для CLI работает
+[ ] DTO validation работает
 
-[ ] migration npm scripts работают
+[ ] email нормализуется
 
-[ ] User Entity создан
+[ ] пароль хешируется Argon2id
 
-[ ] Recipe Entity создан
+[ ] plain password никогда не хранится
 
-[ ] RecipeIngredient Entity создан
+[ ] passwordHash не возвращается обычными User queries
 
-[ ] RecipeStep Entity создан
+[ ] duplicate email → 409
 
-[ ] RecipeStatus enum создан
+[ ] POST /auth/register работает
 
-[ ] UsersModule регистрирует User
+[ ] POST /auth/login работает
 
-[ ] RecipesModule регистрирует recipe Entity
+[ ] POST /auth/logout работает
 
-[ ] AppModule подключает новые modules
+[ ] GET /auth/current работает
 
-[ ] User 1:N Recipe настроено
+[ ] JWT создаётся
 
-[ ] Recipe 1:N RecipeIngredient настроено
+[ ] JWT payload содержит только необходимое
 
-[ ] Recipe 1:N RecipeStep настроено
+[ ] JWT secret находится в env
 
-[ ] explicit userId присутствует в Recipe
+[ ] JWT имеет expiration
 
-[ ] explicit recipeId присутствует в Ingredient и Step
+[ ] JWT хранится в HttpOnly cookie
 
-[ ] ON DELETE CASCADE настроен корректно
+[ ] JWT не возвращается frontend в response body
 
-[ ] UNIQUE(recipe_id, position) существует для ingredients
+[ ] cookie SameSite=Lax
 
-[ ] UNIQUE(recipe_id, position) существует для steps
+[ ] cookie Secure=true для production
 
-[ ] index recipes.user_id существует
+[ ] cookie очищается при logout
 
-[ ] initial migration создана
+[ ] cookie-parser подключён
 
-[ ] migration SQL вручную проверен
+[ ] CORS credentials включены
 
-[ ] migration:run работает
+[ ] JwtAuthGuard работает
 
-[ ] migration:show работает
+[ ] global auth protection работает
 
-[ ] migration:revert проверен
+[ ] @Public() работает
 
-[ ] migration повторно применена после revert
+[ ] /health остаётся public
 
-[ ] реальные таблицы/relations/constraints проверены в PostgreSQL
+[ ] @CurrentUser() работает
+
+[ ] invalid JWT → 401
+
+[ ] expired JWT → 401
+
+[ ] missing JWT → 401
+
+[ ] wrong password → 401
+
+[ ] unknown email → тот же 401
+
+[ ] registration автоматически авторизует пользователя
+
+[ ] login автоматически авторизует пользователя
+
+[ ] focused auth tests проходят
+
+[ ] manual register → me → logout → login flow проверен
+
+[ ] database password_hash проверен
+
+[ ] существующая migration не изменена
+
+[ ] новая migration без причины не создавалась
 
 [ ] backend build проходит
 
 [ ] backend lint проходит
 
+[ ] tests проходят
+
 [ ] frontend не изменялся
 
-[ ] auth не реализовывался
+[ ] Recipes API не реализовывался
 
-[ ] parser не реализовывался
+[ ] Queue не реализовывалась
 
-[ ] queue не реализовывалась
+[ ] Parser не реализовывался
 ```
 
 ---
 
-# 17. Финальный review
+# Step 34 — Финальный review
 
-После завершения не переходи к Auth.
+После завершения НЕ переходи автоматически к следующему этапу.
 
-Сначала дай отчёт:
+Дай отчёт:
 
 ## Что изменено
 
-Короткий список файлов и решений.
+Файлы и основные решения.
 
-## Database schema
+## Authentication flow
 
-Покажи итоговую схему:
+Коротко:
 
 ```text
-User
-→ Recipe
-→ Ingredient / Step
+register/login
+→ JWT
+→ HttpOnly cookie
+→ guard
+→ protected API
 ```
 
-## Migration
+## Security
 
-Укажи:
+Что проверено.
 
-- имя migration;
-- run result;
-- revert result;
-- repeat run result.
+## Tests
+
+Какие tests запущены и результат.
+
+## Manual verification
+
+Результат:
+
+```text
+register
+me
+logout
+login
+```
 
 ## MUST FIX
 
-Если есть проблемы, которые блокируют следующий этап.
+Блокирующие проблемы.
 
 ## SHOULD IMPROVE
 
@@ -1587,42 +1758,58 @@ User
 
 ## OPTIONAL
 
-То, что можно оставить на будущее.
+Что сознательно оставлено на будущее.
 
 ## VERDICT
 
-Явно:
+Однозначно:
 
 ```text
-Этап 2 готов к переходу на Этап 3
+Этап 3 готов к переходу на Этап 4
 ```
 
 или:
 
 ```text
-Этап 2 пока не готов
+Этап 3 пока не готов
 ```
 
 с причиной.
 
-Также обнови:
+Обнови:
 
 ```text
 apps/codex/AGENT_PROGRESS.md
 ```
 
-так, чтобы другой Codex session мог продолжить работу без потери контекста.
+так, чтобы следующая Codex session понимала текущее состояние проекта без необходимости восстанавливать историю.
 
 ---
 
-# Начало
+# Следующий этап
 
-Сейчас начни с:
+После успешной проверки следующим будет:
 
-```text
-Step 1 — аудит текущей database-конфигурации
-```
+**Этап 4 — Recipes Backend API без Parser и Queue**
 
-Сначала покажи мне краткий результат аудита и предложенную структуру файлов.
+Но сейчас к нему не переходить.
 
-Не начинай создание Entity до того, как станет понятно, как именно в текущем NodeNext + TypeORM setup будут работать migrations.
+---
+
+# Начало работы
+
+Начни только с:
+
+**Step 1 — Audit перед Auth.**
+
+Пока ничего не изменяй.
+
+Покажи мне:
+
+1. текущее состояние auth-related dependencies;
+2. что уже готово в `User`;
+3. какие packages действительно нужно установить;
+4. предлагаемую структуру `auth/`;
+5. есть ли какие-либо проблемы в текущей архитектуре, которые блокируют Authentication.
+
+После этого остановись.

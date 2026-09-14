@@ -9,8 +9,10 @@ import {
 } from 'typeorm';
 import { Recipe } from '../../recipes/entities/recipe.entity';
 
+export const USER_EMAIL_UNIQUE_CONSTRAINT = 'UQ_users_email';
+
 @Entity({ name: 'users' })
-@Unique('UQ_users_email', ['email'])
+@Unique(USER_EMAIL_UNIQUE_CONSTRAINT, ['email'])
 export class User {
   @PrimaryGeneratedColumn()
   id!: number;
