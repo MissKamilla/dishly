@@ -1,3 +1,4 @@
+import { Transform } from 'class-transformer';
 import {
   IsEmail,
   IsNotEmpty,
@@ -5,8 +6,10 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
+import { transformEmail } from '../../users/email-normalization';
 
 export class RegisterDto {
+  @Transform(({ value }) => transformEmail(value))
   @IsEmail()
   @MaxLength(320)
   email!: string;

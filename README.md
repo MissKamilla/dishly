@@ -62,6 +62,8 @@ URLs:
 cd apps/backend
 npm run build
 npm run lint
+npm test
+npm run migration:show
 ```
 
 ```bash

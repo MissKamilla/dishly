@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { isPostgresUniqueViolation } from '../database/postgres-error';
+import { normalizeEmail } from './email-normalization';
 import { USER_EMAIL_UNIQUE_CONSTRAINT, User } from './entities/user.entity';
 import { DuplicateUserEmailError } from './errors/duplicate-user-email.error';
 
@@ -27,7 +28,7 @@ export class UsersService {
 
   async findByEmail(email: string): Promise<User | null> {
     return this.usersRepository.findOne({
-      where: { email: this.normalizeEmail(email) },
+      where: { email: normalizeEmail(email) },
     });
   }
 
@@ -35,12 +36,12 @@ export class UsersService {
     return this.usersRepository
       .createQueryBuilder('user')
       .addSelect('user.passwordHash')
-      .where('user.email = :email', { email: this.normalizeEmail(email) })
+      .where('user.email = :email', { email: normalizeEmail(email) })
       .getOne();
   }
 
   async create(data: CreateUserData): Promise<User> {
-    const normalizedEmail = this.normalizeEmail(data.email);
+    const normalizedEmail = normalizeEmail(data.email);
     const user = this.usersRepository.create({
       ...data,
       email: normalizedEmail,
@@ -54,10 +55,6 @@ export class UsersService {
     }
 
     return createdUser;
-  }
-
-  private normalizeEmail(email: string): string {
-    return email.trim().toLowerCase();
   }
 
   private async saveUser(user: User): Promise<User> {
