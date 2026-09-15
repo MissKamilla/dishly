@@ -5,16 +5,16 @@
 ## Текущий контекст
 
 - Проект: Dishly.
-- Текущий этап: Этап 3 - Backend Authentication завершен.
-- Текущая ветка: `feature/auth`.
+- Текущий этап: Этап 4 - Recipes Backend API без Parser и Queue.
+- Текущая ветка: `feature/recipes-api`.
 - Последние коммиты:
   - `69fdfee Merge pull request #1 from MissKamilla/feature/project-bootstrap`
   - `f017d83 feat: complete project bootstrap`
   - `d7012f4 feat: scaffold React frontend`
   - `2d8995d chore: configure TypeORM and Redis infrastructure`
   - `a7ee82b chore: add PostgreSQL docker compose service`
-- Главный принцип этапа: реализовать backend authentication через JWT + HttpOnly cookie без refresh/session/OAuth.
-- Следующий этап по плану: Этап 4 - Recipes Backend API без Parser и Queue.
+- Главный принцип этапа: реализовать Recipes Backend API только для существующих recipe records, с обязательным ownership через `currentUser.id`.
+- Следующий шаг по плану: Этап 4 Step 5 - GET /recipes service logic.
 - Не переходить к следующему этапу без явной команды разработчика.
 
 ## На чем остановились
@@ -22,10 +22,52 @@
 Продолжать нужно с:
 
 ```text
-Этап 3 Step 34 завершен - Backend Authentication готов к переходу на Этап 4
+Этап 4 Step 4 завершен - RecipesService создан
 ```
 
-Причина: финальный review завершен, блокирующих проблем нет, все проверки этапа пройдены.
+Причина: `RecipesService` зарегистрирован в `RecipesModule` и готов для добавления user-owned recipe queries в следующих шагах.
+
+Ключевые выводы Этапа 4:
+
+- Step 1 Audit Recipes завершен:
+  - `RecipesModule` уже регистрирует `Recipe`, `RecipeIngredient`, `RecipeStep` repositories через `TypeOrmModule.forFeature`;
+  - `Recipe` имеет индекс `IDX_recipes_user_id` по `userId`;
+  - `Recipe -> User`, `RecipeIngredient -> Recipe`, `RecipeStep -> Recipe` используют database `ON DELETE CASCADE`;
+  - `RecipeIngredient` и `RecipeStep` имеют unique constraint по `(recipe_id, position)`;
+  - `AuthenticatedUser` содержит только `{ id: number }`;
+  - future `RecipesController` должен получать текущего пользователя через `@CurrentUser()`;
+  - recipes endpoints будут protected глобальным `JwtAuthGuard`, если не добавлять `@Public()`;
+  - новая migration для Step 1/2 не нужна.
+- Step 2 API contracts завершен:
+  - добавлен `apps/backend/src/recipes/types/recipe-response.types.ts`;
+  - `RecipeListItemResponse` не содержит `ingredients`, `steps`, `user`, `userId`, `errorMessage`;
+  - `RecipeDetailsResponse` содержит `description`, `ingredients`, `steps`;
+  - `RecipeIngredientResponse` не содержит `recipeId`/`recipe`;
+  - `RecipeStepResponse` не содержит `recipeId`/`recipe`;
+  - `errorMessage` намеренно не входит в public API contracts;
+  - `npm run build` из `apps/backend` прошел успешно;
+  - `npm run lint` из `apps/backend` прошел успешно.
+- Step 3 ListRecipesQueryDto завершен:
+  - добавлен `apps/backend/src/recipes/dto/list-recipes-query.dto.ts`;
+  - `status` опционален и имеет тип `RecipeStatus[]`;
+  - `?status=pending` трансформируется в `[RecipeStatus.PENDING]`;
+  - `?status=pending&status=processing` остается массивом statuses;
+  - unknown status валидируется как ошибка DTO, после подключения DTO в controller global `ValidationPipe` вернет `400 Bad Request`;
+  - добавлен focused unit test `apps/backend/src/recipes/dto/list-recipes-query.dto.spec.ts`;
+  - `npm test -- list-recipes-query.dto.spec.ts` из `apps/backend` прошел успешно;
+  - `npm run build` из `apps/backend` прошел успешно;
+  - `npm run lint` из `apps/backend` прошел успешно.
+- Step 4 RecipesService завершен:
+  - добавлен `apps/backend/src/recipes/recipes.service.ts`;
+  - service использует `Repository<Recipe>` через `@InjectRepository(Recipe)`;
+  - добавлены минимальные методы `findAllForUser`, `findOneForUser`, `deleteForUser`;
+  - все три метода принимают `userId`, чтобы service API сразу выражал ownership boundary;
+  - `RecipesService` зарегистрирован как provider в `RecipesModule`;
+  - status filter, `createdAt DESC`, details relations ordering, not-found exceptions и public response mapping остаются для Step 5/7/8/9;
+  - исправление: первая версия Step 4 содержала только service skeleton, после review разработчика Step 4 дополнен обязательными методами;
+  - `npm run build` из `apps/backend` прошел успешно;
+  - `npm run lint` из `apps/backend` прошел успешно;
+  - `npm test` из `apps/backend` прошел успешно.
 
 Ключевые выводы аудита:
 
