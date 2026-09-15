@@ -1,6 +1,6 @@
 # Рабочие заметки Codex по Dishly
 
-Последнее обновление: 2026-09-14.
+Последнее обновление: 2026-09-15.
 
 ## Текущий контекст
 
@@ -14,7 +14,7 @@
   - `2d8995d chore: configure TypeORM and Redis infrastructure`
   - `a7ee82b chore: add PostgreSQL docker compose service`
 - Главный принцип этапа: реализовать Recipes Backend API только для существующих recipe records, с обязательным ownership через `currentUser.id`.
-- Следующий шаг по плану: Этап 4 Step 5 - GET /recipes service logic.
+- Следующий шаг по плану: Этап 4 Step 11 - Tests.
 - Не переходить к следующему этапу без явной команды разработчика.
 
 ## На чем остановились
@@ -22,10 +22,10 @@
 Продолжать нужно с:
 
 ```text
-Этап 4 Step 4 завершен - RecipesService создан
+Этап 4 Step 10 завершен - N+1 query audit пройден
 ```
 
-Причина: `RecipesService` зарегистрирован в `RecipesModule` и готов для добавления user-owned recipe queries в следующих шагах.
+Причина: list endpoint использует один `repository.find` без relations, details endpoint использует один `repository.findOne` с нужными relations, ручного per-recipe догружания children нет.
 
 Ключевые выводы Этапа 4:
 
@@ -65,6 +65,91 @@
   - `RecipesService` зарегистрирован как provider в `RecipesModule`;
   - status filter, `createdAt DESC`, details relations ordering, not-found exceptions и public response mapping остаются для Step 5/7/8/9;
   - исправление: первая версия Step 4 содержала только service skeleton, после review разработчика Step 4 дополнен обязательными методами;
+  - `npm run build` из `apps/backend` прошел успешно;
+  - `npm run lint` из `apps/backend` прошел успешно;
+  - `npm test` из `apps/backend` прошел успешно.
+- Step 5 GET /recipes service logic завершен:
+  - `RecipesService.findAllForUser` теперь принимает `userId` и `statuses?: RecipeStatus[]`;
+  - базовое условие list query: `where.userId = currentUser.id`;
+  - при непустом status filter используется TypeORM `In(statuses)`;
+  - после review разработчика status filter переписан через явный `FindOptionsWhere<Recipe>` и отдельный `if`, без object spread в query body;
+  - пустой statuses array трактуется как отсутствие status filter;
+  - list query сортирует recipes через `order: { createdAt: 'DESC' }`;
+  - list query не задает `relations`, поэтому не загружает `ingredients`, `steps`, `user`;
+  - list response теперь мапится в `RecipeListItemResponse`, чтобы `GET /recipes` не возвращал Entity напрямую;
+  - добавлен focused unit test `apps/backend/src/recipes/recipes.service.spec.ts` для ownership condition, status filter, сортировки и отсутствия relations в list query;
+  - из-за CommonJS Jest setup для `@nestjs/typeorm` в service spec добавлен локальный mock `InjectRepository`, как ранее в auth specs;
+  - `npm test -- recipes.service.spec.ts` из `apps/backend` прошел успешно;
+  - `npm run build` из `apps/backend` прошел успешно;
+  - `npm run lint` из `apps/backend` прошел успешно;
+  - `npm test` из `apps/backend` прошел успешно.
+- Step 6 GET /recipes controller завершен:
+  - добавлен `apps/backend/src/recipes/recipes.controller.ts`;
+  - `RecipesController` зарегистрирован в `RecipesModule`;
+  - route `GET /recipes` получает `AuthenticatedUser` через `@CurrentUser()`;
+  - route получает `ListRecipesQueryDto` через `@Query()`;
+  - controller передает в service только `user.id` и `query.status`;
+  - controller не принимает `userId` из frontend;
+  - controller не импортирует TypeORM и не содержит repository/query logic;
+  - `@Public()` на recipes controller/route не добавлялся, endpoint остается protected global `JwtAuthGuard`;
+  - добавлен focused unit test `apps/backend/src/recipes/recipes.controller.spec.ts`;
+  - `npm test -- recipes.service.spec.ts recipes.controller.spec.ts list-recipes-query.dto.spec.ts` из `apps/backend` прошел успешно;
+  - `npm run build` из `apps/backend` прошел успешно;
+  - `npm run lint` из `apps/backend` прошел успешно;
+  - `npm test` из `apps/backend` прошел успешно.
+- Step 7 GET /recipes/:id завершен:
+  - добавлен route `GET /recipes/:id` в `RecipesController`;
+  - добавлен `apps/backend/src/recipes/pipes/parse-positive-int.pipe.ts`;
+  - recipe id валидируется как positive safe integer; `0`, negative, decimal, empty и non-number values дают `BadRequestException`;
+  - controller получает id через `@Param('id', ParsePositiveIntPipe)`, без ручного `Number(id)`;
+  - controller передает в service только `user.id` и parsed `recipeId`;
+  - `RecipesService.findOneForUser` теперь ищет recipe одновременно по `id` и `userId`;
+  - details query загружает только relations `ingredients` и `steps`, без `user`;
+  - details query задает `ingredients.position ASC` и `steps.position ASC`;
+  - если recipe не найден, включая чужой recipe, service выбрасывает `NotFoundException('Recipe not found')`;
+  - details response мапится в `RecipeDetailsResponse`, не возвращается Entity напрямую;
+  - Entity to response mapping вынесен в `apps/backend/src/recipes/recipes.mapper.ts`, чтобы `RecipesService` оставался про queries/ownership/errors;
+  - причина mapping: `repository.find()` напрямую вернул бы Entity с `description`, `errorMessage`, `userId`;
+  - добавлен focused mapper test `apps/backend/src/recipes/recipes.mapper.spec.ts`;
+  - добавлены tests для details query, 404, controller delegation и positive id pipe;
+  - `npm test -- recipes.service.spec.ts recipes.mapper.spec.ts` из `apps/backend` прошел успешно;
+  - `npm test -- recipes.service.spec.ts recipes.controller.spec.ts parse-positive-int.pipe.spec.ts` из `apps/backend` прошел успешно;
+  - `npm run build` из `apps/backend` прошел успешно;
+  - `npm run lint` из `apps/backend` прошел успешно;
+  - `npm test` из `apps/backend` прошел успешно.
+- Step 8 DELETE /recipes/:id завершен:
+  - добавлен route `DELETE /recipes/:id` в `RecipesController`;
+  - route использует `@HttpCode(204)` и возвращает `Promise<void>`, без deleted Entity в response;
+  - route получает current user через `@CurrentUser()` и recipe id через `@Param('id', ParsePositiveIntPipe)`;
+  - controller передает в service только `user.id` и parsed `recipeId`;
+  - `RecipesService.deleteForUser` выполняет один `repository.delete({ id: recipeId, userId })`;
+  - если `DeleteResult.affected !== 1`, service выбрасывает `NotFoundException('Recipe not found')`;
+  - child rows `RecipeIngredient`/`RecipeStep` вручную не удаляются; это остается ответственностью существующего DB `ON DELETE CASCADE`;
+  - добавлены focused tests для delete success, delete not found/foreign recipe behavior через `affected: 0`, controller delegation;
+  - `npm test -- recipes.service.spec.ts recipes.controller.spec.ts` из `apps/backend` прошел успешно;
+  - `npm run build` из `apps/backend` прошел успешно;
+  - `npm run lint` из `apps/backend` прошел успешно;
+  - `npm test` из `apps/backend` прошел успешно.
+- Step 9 явное mapping Entity → API response завершен:
+  - mapping реализован в `apps/backend/src/recipes/recipes.mapper.ts`;
+  - exported mapper functions: `toRecipeListItemResponse`, `toRecipeDetailsResponse`;
+  - internal mapper functions: ingredient/step response mapping без `recipeId` и `recipe`;
+  - `RecipesService.findAllForUser` возвращает `RecipeListItemResponse[]`, а не `Recipe[]`;
+  - `RecipesService.findOneForUser` возвращает `RecipeDetailsResponse`, а не `Recipe`;
+  - `RecipesController` типизирован public response types и не возвращает Entity напрямую;
+  - `RecipesService.deleteForUser` возвращает `void`, deleted Entity не возвращается;
+  - mapper tests проверяют отсутствие persistence-only fields: `userId`, `errorMessage`, `recipeId`, relation backrefs;
+  - audit через `rg` не нашел public `Promise<Recipe>` / `Recipe[]` response в recipes controller/service;
+  - `npm test -- recipes.mapper.spec.ts recipes.service.spec.ts recipes.controller.spec.ts` из `apps/backend` прошел успешно;
+  - `npm run build` из `apps/backend` прошел успешно;
+  - `npm run lint` из `apps/backend` прошел успешно;
+  - `npm test` из `apps/backend` прошел успешно.
+- Step 10 никаких N+1 queries завершен:
+  - audit `RecipesService.findAllForUser`: один `repository.find`, без `relations`, без per-recipe child queries;
+  - audit `RecipesService.findOneForUser`: один `repository.findOne` с relations `ingredients`/`steps`, без загрузки `user`;
+  - audit через `rg` не нашел ручных loops с repository calls в recipes module;
+  - service tests усилены assertions `toHaveBeenCalledTimes(1)` и проверками отсутствия лишних repository calls;
+  - `npm test -- recipes.service.spec.ts` из `apps/backend` прошел успешно;
   - `npm run build` из `apps/backend` прошел успешно;
   - `npm run lint` из `apps/backend` прошел успешно;
   - `npm test` из `apps/backend` прошел успешно.
