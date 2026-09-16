@@ -14,7 +14,7 @@
   - `2d8995d chore: configure TypeORM and Redis infrastructure`
   - `a7ee82b chore: add PostgreSQL docker compose service`
 - Главный принцип этапа: реализовать Recipes Backend API только для существующих recipe records, с обязательным ownership через `currentUser.id`.
-- Следующий шаг по плану: Этап 4 Step 11 - Tests.
+- Следующий шаг по плану: Этап 5 - BullMQ + Redis Recipe Queue, только после явной команды разработчика.
 - Не переходить к следующему этапу без явной команды разработчика.
 
 ## На чем остановились
@@ -22,10 +22,10 @@
 Продолжать нужно с:
 
 ```text
-Этап 4 Step 10 завершен - N+1 query audit пройден
+Этап 4 Step 24 завершен - финальный review пройден
 ```
 
-Причина: list endpoint использует один `repository.find` без relations, details endpoint использует один `repository.findOne` с нужными relations, ручного per-recipe догружания children нет.
+Причина: Recipes Backend API для существующих recipe records реализован, проверен unit/manual/final checks, блокирующих проблем нет.
 
 Ключевые выводы Этапа 4:
 
@@ -153,6 +153,152 @@
   - `npm run build` из `apps/backend` прошел успешно;
   - `npm run lint` из `apps/backend` прошел успешно;
   - `npm test` из `apps/backend` прошел успешно.
+- Step 11 Tests завершен:
+  - текущая test architecture оценена: для service query logic используются focused unit tests с repository mock, без новой database integration infrastructure;
+  - `RecipesService` tests покрывают: list только по `userId`, status filter, `createdAt DESC`, отсутствие relations в list;
+  - `RecipesService` tests покрывают: details success, simultaneous `id + userId` lookup, relations `ingredients`/`steps`, `position ASC`, несуществующий recipe → `404`, чужой recipe → `404`;
+  - `RecipesService` tests покрывают: delete success, delete по `id + userId`, несуществующий recipe → `404`, чужой recipe → `404`;
+  - `RecipesController` tests покрывают delegation с `@CurrentUser`-style user id для list/details/delete;
+  - `ListRecipesQueryDto` tests покрывают missing/single/multiple/invalid statuses;
+  - `ParsePositiveIntPipe` tests покрывают valid positive integer и invalid id values;
+  - `recipes.mapper` tests покрывают отсутствие persistence-only fields в public responses;
+  - manual ownership HTTP/API flow остается обязательным для Step 12;
+  - `npm test -- recipes.service.spec.ts` из `apps/backend` прошел успешно;
+  - `npm run build` из `apps/backend` прошел успешно;
+  - `npm run lint` из `apps/backend` прошел успешно;
+  - `npm test` из `apps/backend` прошел успешно.
+- Step 12 Manual API verification завершен:
+  - `dishly-postgres-1` и `dishly-redis-1` были healthy по `docker ps`;
+  - port `3000` оказался занят, но не отвечал на `/health`; для проверки backend был запущен на `PORT=3001`;
+  - первый запуск backend из sandbox не смог подключиться к PostgreSQL из-за `EPERM 127.0.0.1:5433`, затем backend был запущен с разрешением на локальное подключение;
+  - `GET /health` на `localhost:3001` вернул `200`;
+  - через `POST /auth/register` созданы User A и User B, response содержал только public user fields;
+  - User A id: `3`, User B id: `4`;
+  - напрямую в PostgreSQL созданы Recipe A1 id `1` для User A со status `pending`, Recipe A2 id `2` для User A со status `completed`, Recipe B1 id `3` для User B со status `processing`;
+  - для A1 напрямую в PostgreSQL созданы 2 ingredients и 2 steps;
+  - под cookie User A `GET /recipes` вернул `200` и только A2/A1, без B1;
+  - порядок `GET /recipes`: A2 перед A1, что подтверждает `createdAt DESC`;
+  - под cookie User A `GET /recipes/1` вернул `200` и details A1 с ingredients/steps;
+  - ingredients и steps в response A1 отсортированы по `position ASC`;
+  - под cookie User A `GET /recipes/3` вернул `404 Recipe not found`;
+  - под cookie User A `DELETE /recipes/3` вернул `404 Recipe not found`;
+  - PostgreSQL check после foreign delete подтвердил, что B1 id `3` остался в БД и принадлежит User B;
+  - под cookie User A `GET /recipes?status=pending` вернул `200` и только A1;
+  - под cookie User A `GET /recipes?status=pending&status=processing` вернул `200` и только A1, потому что processing recipe B1 принадлежит другому user;
+  - под cookie User A `GET /recipes?status=hello` вернул `400 Bad Request`;
+  - test cookies и response файлы сохранялись только во временных `/tmp/dishly-step12-*` файлах;
+  - JWT/token values в progress не записывались.
+- Step 13 проверить cascade delete завершен:
+  - перед проверкой PostgreSQL подтвердил, что Recipe A1 id `1` существует и имеет 2 ingredients + 2 steps;
+  - backend временно запущен на `PORT=3001`, затем остановлен после проверки;
+  - под cookie User A `DELETE /recipes/1` вернул `204 No Content`;
+  - response body для `204` был пустой;
+  - под cookie User A повторный `GET /recipes/1` вернул `404 Recipe not found`;
+  - прямой PostgreSQL check показал `COUNT(*) = 0` для `recipes WHERE id = 1`;
+  - прямой PostgreSQL check показал `COUNT(*) = 0` для `recipe_ingredients WHERE recipe_id = 1`;
+  - прямой PostgreSQL check показал `COUNT(*) = 0` для `recipe_steps WHERE recipe_id = 1`;
+  - service не удалял child rows вручную; каскад выполнен существующим FK `ON DELETE CASCADE`.
+- Step 14 auth regression check завершен:
+  - backend временно запущен на `PORT=3001`, затем остановлен после проверки;
+  - `GET /health` без cookie вернул `200` и body `{"status":"ok"}`;
+  - `GET /recipes` без cookie вернул `401` и body `{"message":"Authentication required","error":"Unauthorized","statusCode":401}`;
+  - `GET /recipes` с valid cookie User A вернул `200`;
+  - после Step 13 User A list содержит только оставшийся A2, что ожидаемо после удаления A1;
+  - `GET /auth/current` с valid cookie User A вернул `200` и public user body;
+  - `/auth/current` не переименовывался;
+  - recipes endpoints остаются protected-by-default, `@Public()` на них не добавлялся.
+- Step 15 schema regression завершен:
+  - diff по `apps/backend/src/recipes/entities`, `apps/backend/src/users/entities`, `apps/backend/src/database/migrations` отсутствует;
+  - migration directory содержит только `.gitkeep` и `1788879733493-CreateInitialSchema.ts`;
+  - `CreateInitialSchema` не редактировалась;
+  - новая migration не нужна, потому что database schema на этом этапе не менялась;
+  - `npm run migration:show` из `apps/backend` прошел успешно;
+  - результат `migration:show`: `[X] 2 CreateInitialSchema1788879733493`.
+- Step 16 README завершен:
+  - проверен root `README.md`: есть setup/run/checks, но нет API section;
+  - проверен `apps/backend/README.md`: файл остается стандартным Nest boilerplate и не является подходящим местом для точечного описания Recipes API;
+  - по условию Step 16 README не менялся, потому что добавление новой API section только ради трех endpoint-ов сейчас было бы лишним;
+  - итоговые endpoints остаются зафиксированы в task/progress и будут перечислены в финальном review Step 24.
+- Step 17 что НЕ входит в этот этап завершен:
+  - не добавлялись `POST /recipes`, `POST /recipes/import`, `POST /recipes/:id/retry`, `PATCH /recipes/:id`;
+  - не добавлялись BullMQ/Redis queue integration/Worker/Processor;
+  - не добавлялись HTML fetch, Good Food parser, JSON-LD, Schema.org parsing;
+  - не добавлялись frontend recipes page/cards/Add Recipe modal;
+  - не добавлялись WebSockets/SSE/polling, AI, shopping list;
+  - audit через `rg` по recipes module не нашел запрещенных route decorators/features.
+- Step 18 архитектурные правила завершен:
+  - `RecipesController` содержит только HTTP boundary: `@CurrentUser`, `@Query`, `@Param`, вызовы `RecipesService`;
+  - `RecipesController` не импортирует TypeORM repository и не содержит ownership query logic;
+  - `RecipesService` содержит recipe queries, ownership conditions, `NotFoundException` behavior и вызовы mapper;
+  - используется стандартный `Repository<Recipe>` через `@InjectRepository(Recipe)`;
+  - отдельный custom repository class не создавался;
+  - DTO (`ListRecipesQueryDto`), Entity (`Recipe*`) и API response types (`recipe-response.types.ts`) остаются разными ролями.
+- Step 19 Pagination завершен:
+  - pagination не добавлялась;
+  - query DTO не содержит `page`, `cursor`, `limit`, `totalCount`;
+  - pagination зафиксирована как будущее улучшение при большом количестве recipes, не часть текущего MVP API.
+- Step 20 Search / sorting завершен:
+  - search/categories/tags не добавлялись;
+  - custom sorting не добавлялась;
+  - единственная фильтрация сейчас: `status`;
+  - единственная сортировка сейчас: `createdAt DESC` в `RecipesService.findAllForUser`.
+- Step 21 Error handling завершен:
+  - invalid query/status обрабатывается DTO/global `ValidationPipe` как `400 Bad Request`;
+  - invalid recipe id обрабатывается `ParsePositiveIntPipe` как `400 Bad Request`;
+  - missing/invalid auth cookie обрабатывается global `JwtAuthGuard` как `401 Authentication required`;
+  - missing/foreign recipe для details/delete обрабатывается `NotFoundException('Recipe not found')`;
+  - raw TypeORM/PostgreSQL errors специально не ловятся и не превращаются в `404`;
+  - unexpected database errors остаются для стандартного Nest exception flow/logging;
+  - audit recipes module не выявил отдачи raw database errors в expected business flows.
+- Step 22 Финальные проверки завершен:
+  - `npm run build` из `apps/backend` прошел успешно;
+  - `npm run lint` из `apps/backend` прошел успешно;
+  - `npm test` из `apps/backend` прошел успешно: 7 suites, 35 tests;
+  - `npm run migration:show` из `apps/backend` прошел успешно: `[X] 2 CreateInitialSchema1788879733493`;
+  - `docker compose ps` из root прошел успешно с escalation из-за Docker socket permissions;
+  - `dishly-postgres-1` healthy, port `5433`;
+  - `dishly-redis-1` healthy, port `6380`;
+  - `git status --short` проверен;
+  - `git diff` проверен: unstaged diff пустой на момент финальной проверки;
+  - `git diff --cached --stat` проверен;
+  - frontend build не запускался, потому что frontend не изменялся.
+- Step 23 Definition of Done завершен:
+  - RecipesService создан;
+  - RecipesController создан;
+  - RecipesModule регистрирует service/controller;
+  - `GET /recipes`, `GET /recipes/:id`, `DELETE /recipes/:id` работают;
+  - `GET /recipes` требует authentication;
+  - `GET /recipes` возвращает только recipes текущего user;
+  - list не загружает ingredients/steps/user;
+  - recipes сортируются `createdAt DESC`;
+  - status query validation работает для single/multiple/invalid values;
+  - recipe id валидируется как positive integer;
+  - details возвращает ingredients/steps с `position ASC`;
+  - чужой и несуществующий recipe возвращают `404`;
+  - delete success возвращает `204`;
+  - чужой recipe нельзя удалить, foreign delete возвращает `404`;
+  - DB `ON DELETE CASCADE` удаляет ingredients/steps;
+  - `userId` не принимается от frontend и не утекает в response;
+  - Entity не возвращается напрямую как API contract;
+  - raw `errorMessage` не утекает в response;
+  - N+1 queries не созданы;
+  - новых migrations без причины нет, initial migration не редактировалась;
+  - auth продолжает работать, `/health` остается public;
+  - focused tests и manual ownership flow пройдены;
+  - backend build/lint/tests проходят;
+  - frontend не изменялся;
+  - BullMQ и Parser не подключались.
+- Step 24 финальный review завершен:
+  - итоговые endpoints: `GET /recipes`, `GET /recipes/:id`, `DELETE /recipes/:id`;
+  - ownership проверен manual flow с User A/User B;
+  - list query не загружает relations;
+  - details query загружает `ingredients`/`steps` без `user`;
+  - ordering обеспечен через `createdAt DESC` для list и `position ASC` для details children;
+  - cascade delete подтвержден PostgreSQL checks;
+  - MUST FIX: нет;
+  - SHOULD IMPROVE: `apps/backend/README.md` остается Nest boilerplate, можно очистить отдельным docs cleanup task;
+  - OPTIONAL: pagination/search/recipe import/retry/edit остаются будущими features;
+  - verdict: Этап 4 готов к переходу на Этап 5.
 
 Ключевые выводы аудита:
 

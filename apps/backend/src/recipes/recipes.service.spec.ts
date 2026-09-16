@@ -183,6 +183,24 @@ describe('RecipesService', () => {
         },
       );
     });
+
+    it('throws not found when the recipe belongs to another user', async () => {
+      recipesRepository.findOne.mockResolvedValue(null);
+
+      await expect(recipesService.findOneForUser(7, 1)).rejects.toMatchObject({
+        constructor: NotFoundException,
+        message: 'Recipe not found',
+      });
+
+      expect(recipesRepository.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: 1,
+            userId: 7,
+          },
+        }),
+      );
+    });
   });
 
   describe('deleteForUser', () => {
@@ -203,6 +221,20 @@ describe('RecipesService', () => {
       await expect(recipesService.deleteForUser(7, 999)).rejects.toMatchObject({
         constructor: NotFoundException,
         message: 'Recipe not found',
+      });
+    });
+
+    it('throws not found when deleting a recipe that belongs to another user', async () => {
+      recipesRepository.delete.mockResolvedValue({ affected: 0 });
+
+      await expect(recipesService.deleteForUser(7, 1)).rejects.toMatchObject({
+        constructor: NotFoundException,
+        message: 'Recipe not found',
+      });
+
+      expect(recipesRepository.delete).toHaveBeenCalledWith({
+        id: 1,
+        userId: 7,
       });
     });
   });
