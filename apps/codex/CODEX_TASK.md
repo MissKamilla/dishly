@@ -1,26 +1,50 @@
-# Dishly — Этап 4: Recipes Backend API
+# Dishly — Этап 5: BullMQ + Redis Recipe Queue
 
-Продолжаем разработку fullstack-проекта **Dishly**.
+Мы продолжаем разработку fullstack-проекта **Dishly**.
 
-Сейчас выполняем только:
+Текущий этап:
 
-**Этап 4 — Recipes Backend API без Parser и Queue**
+**Этап 5 — реализация инфраструктуры очереди импорта рецептов с BullMQ и Redis.**
 
-Перед началом обязательно:
+Наша цель — создать рабочую и проверенную очередь, которую на следующем этапе можно будет использовать для фонового парсинга рецептов.
 
-1. прочитай корневой `AGENTS.md`;
-2. прочитай `apps/codex/AGENT_PROGRESS.md`;
-3. изучи текущий `RecipesModule` и все Recipe Entity;
-4. изучи текущую authentication architecture;
-5. изучи `@CurrentUser()`, `JwtAuthGuard` и auth types;
-6. выполни `git status`;
-7. не предполагай состояние проекта по этому prompt — сначала проверь реальный код.
-
-Не переходи к BullMQ, Parser или Frontend.
+Работаем с существующим проектом. Не создавай новую архитектуру с нуля и не переписывай готовые модули.
 
 ---
 
-# 1. Текущее состояние проекта
+# 1. Подготовка и аудит
+
+Перед началом:
+
+1. Прочитай корневой `AGENTS.md`.
+2. Прочитай `apps/codex/AGENT_PROGRESS.md`.
+3. Изучи текущий `apps/codex/CODEX_TASK.md`.
+4. Изучи backend, конфигурацию и Docker Compose.
+5. Выполни `git status`.
+6. Проверь версии существующих dependencies.
+
+Особенно изучи:
+
+```text
+apps/backend/package.json
+apps/backend/src/app.module.ts
+apps/backend/src/main.ts
+apps/backend/src/config/validate-environment.ts
+apps/backend/src/recipes/recipes.module.ts
+apps/backend/src/recipes/recipes.service.ts
+apps/backend/src/recipes/entities/recipe.entity.ts
+apps/backend/src/recipes/enums/recipe-status.enum.ts
+apps/backend/.env.example
+docker-compose.yml
+```
+
+Не предполагай, что описание проекта полностью совпадает с кодом. Фактический код имеет приоритет.
+
+**Сначала выполни аудит, покажи результаты и остановись.**
+
+---
+
+# 2. Текущее состояние Dishly
 
 Уже завершены:
 
@@ -28,50 +52,1014 @@
 Этап 1 — Project Bootstrap
 Этап 2 — Database Schema and Entities
 Этап 3 — Backend Authentication
+Этап 4 — Recipes Backend API
 ```
 
-Backend уже содержит:
+Работают следующие endpoints:
+
+```http
+GET    /recipes
+GET    /recipes/:id
+DELETE /recipes/:id
+```
+
+Backend использует:
+
+- NestJS;
+- TypeScript;
+- PostgreSQL;
+- TypeORM;
+- JWT + HttpOnly cookie;
+- глобальный JwtAuthGuard.
+
+Существуют Entity:
 
 ```text
-NestJS
-TypeScript
-PostgreSQL
-TypeORM
-migrations
-
-JWT authentication
-HttpOnly cookie
-global JwtAuthGuard
-@Public()
-@CurrentUser()
-
-UsersService
-AuthService
+User
+Recipe
+RecipeIngredient
+RecipeStep
 ```
 
-Authentication работает secure-by-default:
+Существуют статусы:
+
+```ts
+enum RecipeStatus {
+  PENDING = "pending",
+  PROCESSING = "processing",
+  COMPLETED = "completed",
+  FAILED = "failed",
+}
+```
+
+Redis уже добавлен в Docker Compose.
+
+Локальный host port:
 
 ```text
-все endpoints protected
-↓
-public endpoints явно помечаются @Public()
+6380
 ```
 
-Поэтому будущий:
+Внутренний порт контейнера:
 
 ```text
-/recipes
+6379
 ```
 
-уже автоматически должен требовать authentication.
+Backend запускается локально, не в Docker.
 
-НЕ добавляй `@Public()` на recipe endpoints.
+Поэтому при локальной разработке подключение должно использовать:
+
+```text
+REDIS_HOST=localhost
+REDIS_PORT=6380
+```
+
+Не хардкодить эти значения.
 
 ---
 
-# 2. Текущая Recipe database model
+# 3. Главная цель этапа
 
-Уже существуют:
+Создать инфраструктуру:
+
+```text
+NestJS
+   |
+   v
+BullMQ Queue
+   |
+   v
+Redis
+   |
+   v
+RecipeImportProcessor
+```
+
+Нужно добиться рабочего сценария:
+
+```text
+Добавляем тестовую задачу
+          |
+          v
+      queue.add()
+          |
+          v
+         Redis
+          |
+          v
+        Worker
+          |
+          v
+    Обработка задачи
+          |
+          v
+       Completed
+```
+
+На этом этапе worker выполняет только тестовую обработку.
+
+Он ещё НЕ должен:
+
+- скачивать HTML;
+- парсить сайты;
+- сохранять ингредиенты;
+- изменять Recipe;
+- создавать новые Recipe.
+
+Это будет реализовано позднее.
+
+---
+
+# 4. Архитектурный контракт очереди
+
+Фиксируем имя очереди:
+
+```ts
+export const RECIPE_IMPORT_QUEUE = "recipe-import";
+```
+
+Имя задачи:
+
+```ts
+export const IMPORT_RECIPE_JOB = "import-recipe";
+```
+
+Данные задачи:
+
+```ts
+export interface ImportRecipeJobData {
+  recipeId: number;
+}
+```
+
+Пример:
+
+```ts
+await queue.add(IMPORT_RECIPE_JOB, {
+  recipeId: 42,
+});
+```
+
+Именно такой формат должен использоваться в будущем API импорта.
+
+Не передавать в job весь Recipe.
+
+Не передавать:
+
+```ts
+{
+  (userId, sourceUrl, title, ingredients, steps, status);
+}
+```
+
+**PostgreSQL остаётся основным источником данных.**
+
+В будущем worker получит `recipeId` и самостоятельно загрузит Recipe из БД.
+
+---
+
+# 5. Границы текущего этапа
+
+Сейчас создаём только queue infrastructure.
+
+Не реализовывать:
+
+```http
+POST /recipes/import
+POST /recipes/:id/retry
+```
+
+Не менять существующие GET/DELETE endpoints.
+
+Не добавлять временный публичный API вроде:
+
+```http
+POST /queue/test
+```
+
+только для проверки очереди.
+
+Тестовый запуск будем выполнять через отдельный локальный smoke-test или другую безопасную dev-only процедуру.
+
+Никаких новых HTTP endpoints на этом этапе не требуется.
+
+---
+
+# 6. Планируемая структура
+
+Предпочтительное направление:
+
+```text
+apps/backend/src/
+│
+├── config/
+│   └── validate-environment.ts
+│
+├── recipes/
+│   ├── queue/
+│   │   ├── recipe-import.constants.ts
+│   │   ├── recipe-import.types.ts
+│   │   ├── recipe-import.queue.ts
+│   │   └── recipe-import.processor.ts
+│   │
+│   ├── recipes.module.ts
+│   └── ...
+│
+└── app.module.ts
+```
+
+Имена файлов можно скорректировать, если в текущем проекте есть более подходящее соглашение.
+
+Не создавай отдельную папку или файл на каждую константу, если это только усложняет структуру.
+
+Не создавай generic queue framework, BaseQueue, QueueFactory и дополнительные abstraction layers.
+
+У нас пока одна очередь.
+
+---
+
+# 7. Порядок работы
+
+Работаем последовательно.
+
+Перед каждым крупным блоком:
+
+1. Коротко объясни, что делаем.
+2. Объясни зачем.
+3. Назови файлы, которые будут изменены.
+4. Покажи необходимые команды.
+5. Выполни изменения после моего подтверждения.
+
+Если требуется установить библиотеку:
+
+- сначала покажи команду;
+- объясни назначение dependency;
+- дождись, пока я выполню установку.
+
+Не устанавливай пакеты молча.
+
+После каждого логического блока:
+
+- проверяй компиляцию;
+- запускай подходящие тесты;
+- обновляй `apps/codex/AGENT_PROGRESS.md`.
+
+Не создавай commit без моего отдельного разрешения.
+
+---
+
+# Step 1 — аудит Redis и backend
+
+Сначала ничего не меняй.
+
+Проверь:
+
+- как Redis описан в Docker Compose;
+- используется ли persistent volume;
+- включено ли сохранение данных Redis;
+- как настроена environment validation;
+- подключён ли BullMQ ранее;
+- какие зависимости потребуются;
+- куда логичнее зарегистрировать очередь;
+- как работает lifecycle NestJS при завершении приложения.
+
+Отдельно проверь, не содержит ли существующий проект похожую инфраструктуру, которую можно переиспользовать.
+
+После аудита покажи короткий план файлов и остановись.
+
+---
+
+# Step 2 — установить BullMQ
+
+Нам нужны:
+
+```text
+@nestjs/bullmq
+bullmq
+```
+
+Ожидаемая команда из:
+
+```text
+apps/backend
+```
+
+```bash
+npm install @nestjs/bullmq bullmq
+```
+
+Но сначала проверь актуальную совместимость пакетов с установленным NestJS и между собой.
+
+Используй официальную документацию.
+
+Не устанавливай:
+
+```text
+@nestjs/bull
+bull
+```
+
+Это другая интеграция.
+
+Не устанавливай одновременно Bull и BullMQ.
+
+Не добавляй вручную дополнительные Redis dependencies, если BullMQ уже обеспечивает всё необходимое для нашей конфигурации.
+
+Если дополнительный пакет действительно требуется, объясни причину.
+
+---
+
+# Step 3 — Redis environment variables
+
+Сейчас в backend `.env.example` нет Redis connection variables.
+
+Добавь:
+
+```env
+REDIS_HOST=localhost
+REDIS_PORT=6380
+```
+
+Используй тот же подход к конфигурации, который уже применяется для PostgreSQL.
+
+Не дублируй Redis host/port строками в разных файлах.
+
+Обнови:
+
+```text
+apps/backend/.env.example
+```
+
+Также нужно обновить локальный:
+
+```text
+apps/backend/.env
+```
+
+Не записывай реальные secrets в Git.
+
+---
+
+## Environment validation
+
+В:
+
+```text
+src/config/validate-environment.ts
+```
+
+добавь проверку:
+
+```text
+REDIS_HOST
+REDIS_PORT
+```
+
+`REDIS_HOST` — непустая строка.
+
+`REDIS_PORT` — корректный TCP port:
+
+```text
+1–65535
+```
+
+Не принимай:
+
+```text
+abc
+0
+70000
+6380abc
+```
+
+Проверь, можно ли переиспользовать существующую логику проверки порта без создания ненужных абстракций.
+
+При неправильной конфигурации приложение должно выдавать понятную ошибку на этапе запуска.
+
+---
+
+# Step 4 — проверить сохранение данных Redis
+
+Сейчас Redis описан в Docker Compose без persistent volume.
+
+Для очереди это важный момент.
+
+Если контейнер пересоздаётся, мы не должны без необходимости терять ожидающие задачи.
+
+Изучи возможность включить Redis AOF persistence и добавить named volume.
+
+Предпочтительный подход:
+
+```text
+Redis
+  |
+  v
+AOF persistence
+  |
+  v
+Docker named volume
+```
+
+Внеси минимальные необходимые изменения в `docker-compose.yml`.
+
+Не меняй PostgreSQL configuration.
+
+Не выполняй:
+
+```bash
+docker compose down -v
+```
+
+Это может удалить существующие данные PostgreSQL.
+
+Не обещай абсолютную сохранность каждой задачи при любом сбое: Redis persistence имеет собственные гарантии и ограничения.
+
+Для текущего этапа достаточно корректной локальной конфигурации и понятного поведения при обычном перезапуске контейнера.
+
+Проверь также Redis `maxmemory-policy`; для очереди ожидается политика без автоматического вытеснения ключей.
+
+---
+
+# Step 5 — зарегистрировать BullMQ в NestJS
+
+Изучи официальную интеграцию NestJS с BullMQ.
+
+Используй:
+
+```ts
+BullModule;
+```
+
+и подходящую асинхронную конфигурацию через:
+
+```ts
+ConfigService;
+```
+
+Предпочтительно:
+
+```ts
+BullModule.forRootAsync(...)
+```
+
+Подключение должно использовать:
+
+```text
+REDIS_HOST
+REDIS_PORT
+```
+
+Не хардкодить:
+
+```ts
+host: 'localhost',
+port: 6379
+```
+
+Важно:
+
+```text
+localhost:6380
+```
+
+актуально только для нашего локального запуска.
+
+Если backend позже будет запущен внутри Docker Compose, адрес потребуется настроить через env для контейнерной сети.
+
+Не добавлять сейчас Dockerfile для backend.
+
+---
+
+# Step 6 — зарегистрировать очередь
+
+Создай queue:
+
+```text
+recipe-import
+```
+
+Используй:
+
+```ts
+BullModule.registerQueue(...)
+```
+
+Размести регистрацию в подходящем NestJS module.
+
+Предпочтительно использовать существующий:
+
+```text
+RecipesModule
+```
+
+поскольку очередь относится к домену рецептов.
+
+Но Redis connection configuration должна быть централизована.
+
+Не дублируй настройки подключения внутри каждой очереди.
+
+Не создавай отдельный большой `QueueModule` без необходимости.
+
+---
+
+# Step 7 — типизация job
+
+Создай единый контракт:
+
+```ts
+interface ImportRecipeJobData {
+  recipeId: number;
+}
+```
+
+Используй его и при добавлении задачи, и в processor.
+
+Нельзя иметь разные версии payload в producer и worker.
+
+Не использовать:
+
+```ts
+Job<any>;
+```
+
+если можно явно типизировать данные.
+
+Важно: TypeScript-типы не заменяют runtime validation.
+
+Processor должен корректно реагировать на явно некорректные данные задачи, например отсутствие положительного целочисленного `recipeId`.
+
+Не создавай для этого полноценную DTO/HTTP validation инфраструктуру.
+
+---
+
+# Step 8 — создать producer
+
+Нужно реализовать минимальный механизм добавления задачи в очередь.
+
+Например сервис:
+
+```text
+RecipeImportQueue
+```
+
+или другое понятное название.
+
+Его задача:
+
+```text
+recipeId
+   |
+   v
+queue.add()
+```
+
+Внутри должен использоваться:
+
+```ts
+@InjectQueue(RECIPE_IMPORT_QUEUE)
+```
+
+и типизированный:
+
+```ts
+Queue;
+```
+
+Предполагаемый метод:
+
+```ts
+enqueue(recipeId: number)
+```
+
+Он должен возвращать результат или необходимую информацию об успешном добавлении задачи.
+
+Не привязывай producer к Express request/response.
+
+Не помещай в него бизнес-логику создания Recipe.
+
+В будущем `RecipesService` сможет использовать этот producer после создания Recipe в PostgreSQL.
+
+Но сейчас не подключай новый import flow к существующему `RecipesService`.
+
+---
+
+# Step 9 — создать processor
+
+Создай:
+
+```text
+RecipeImportProcessor
+```
+
+Используй:
+
+```ts
+@Processor(...)
+```
+
+и:
+
+```ts
+WorkerHost;
+```
+
+Processor должен обрабатывать задачу:
+
+```text
+import-recipe
+```
+
+Сейчас он выполняет только:
+
+```text
+получить job
+↓
+проверить имя/payload
+↓
+залогировать начало обработки
+↓
+завершить задачу
+```
+
+Пример полезного логирования:
+
+```text
+Processing recipe import job 123 for recipe 42
+```
+
+Используй стандартный:
+
+```ts
+Logger;
+```
+
+из NestJS.
+
+Не используй `console.log()` в качестве постоянной инфраструктуры логирования.
+
+Не логируй JWT, cookie или secrets.
+
+---
+
+## Очень важно
+
+Processor пока НЕ должен:
+
+```text
+SELECT Recipe
+UPDATE Recipe
+fetch HTML
+parse HTML
+save ingredients
+save steps
+```
+
+И не должен переводить Recipe в:
+
+```text
+PROCESSING
+COMPLETED
+FAILED
+```
+
+На данном этапе мы тестируем только инфраструктуру очереди.
+
+Эти бизнес-статусы будут реализованы на этапе 7.
+
+---
+
+# Step 10 — обработка неизвестных jobs
+
+Processor должен явно обрабатывать ситуацию, когда получил job с неожиданным именем.
+
+Не нужно молча считать неизвестную задачу успешно выполненной.
+
+Предпочтительно выбросить ошибку.
+
+Не добавлять сложную систему регистрации десятков job handlers.
+
+У нас сейчас один тип задачи.
+
+---
+
+# Step 11 — Job lifecycle
+
+Нужно разобраться со следующими состояниями BullMQ:
+
+```text
+waiting
+active
+completed
+failed
+delayed
+```
+
+Не путать их с RecipeStatus.
+
+BullMQ:
+
+```text
+job state
+```
+
+PostgreSQL:
+
+```text
+recipe business status
+```
+
+Это разные вещи.
+
+Frontend в будущем должен получать статус рецепта через PostgreSQL/API, а не через прямой доступ к Redis.
+
+---
+
+# Step 12 — Completed / Failed events
+
+Добавь минимальное логирование результатов обработки.
+
+Нужно видеть:
+
+```text
+Job completed
+```
+
+или:
+
+```text
+Job failed
+```
+
+Используй подходящие возможности BullMQ/NestJS.
+
+При ошибке processor должен выбрасывать исключение.
+
+Не делай:
+
+```ts
+catch (error) {
+  logger.error(error);
+  return;
+}
+```
+
+Иначе BullMQ может посчитать задачу успешно выполненной.
+
+Если ошибка перехватывается для логирования, она должна корректно передаваться дальше.
+
+Не создавать собственную большую error-handling infrastructure.
+
+---
+
+# Step 13 — Retry configuration
+
+В Dishly обязательно предусмотрена возможность повторных попыток.
+
+Начальная конфигурация:
+
+```ts
+{
+  attempts: 3,
+  backoff: {
+    type: 'exponential',
+    delay: 1000,
+  },
+}
+```
+
+Это означает максимум три попытки выполнения задачи.
+
+Настройки можно разместить в:
+
+```text
+defaultJobOptions
+```
+
+или непосредственно при добавлении job.
+
+Выбери один понятный вариант.
+
+Не дублируй настройки в нескольких местах.
+
+Сейчас нужно:
+
+- корректно настроить retries;
+- понять поведение BullMQ;
+- покрыть настройки/ошибки необходимыми тестами.
+
+Не реализовывать изменение `Recipe.status` при retries.
+
+Это будет на этапе 7.
+
+Не добавлять искусственную ветку в production processor вроде `if (recipeId === 999) throw`, только чтобы проверить ошибку.
+
+Проверяй failure behavior через тесты.
+
+---
+
+# Step 14 — поведение при недоступном Redis
+
+Предусмотри, что Redis может быть временно недоступен.
+
+Важно различать:
+
+```text
+API producer
+```
+
+и:
+
+```text
+background worker
+```
+
+В будущем API не должен бесконечно ждать ответа Redis.
+
+Проверь соответствующие connection/retry options установленной версии BullMQ.
+
+Если необходимо, выбери разумную fail-fast конфигурацию для producer.
+
+Не отключай бесконечное восстановление соединения worker без понимания последствий.
+
+Не создавай самостоятельно сложную retry system поверх BullMQ.
+
+---
+
+# Step 15 — graceful shutdown
+
+Проверь lifecycle BullMQ при завершении NestJS.
+
+При остановке приложения должны корректно закрываться используемые подключения и worker.
+
+Используй встроенные возможности NestJS/BullMQ, если они уже обеспечивают это.
+
+Не создавай собственный connection manager без необходимости.
+
+Если потребуется:
+
+```ts
+app.enableShutdownHooks();
+```
+
+объясни почему.
+
+Проверь, что процесс не зависает из-за оставшихся Redis connections.
+
+Не добавляй принудительное закрытие соединений, если это может оборвать выполняющиеся задачи без необходимости.
+
+---
+
+# Step 16 — подготовить безопасный smoke-test
+
+Сейчас публичного endpoint для добавления Recipe ещё нет.
+
+Поэтому нужно проверить очередь отдельно.
+
+Предпочтительно создать минимальный dev-only способ отправить одну job через Nest dependency injection.
+
+Например:
+
+```text
+apps/backend/scripts/queue-smoke.ts
+```
+
+Точное расположение выбери с учётом текущей структуры проекта.
+
+Не создавай огромный CLI framework.
+
+Не создавай HTTP endpoint для тестирования.
+
+Тестовый механизм должен использовать настоящую зарегистрированную очередь или producer.
+
+Не создавать независимый `new Queue(...)` с отдельными захардкоженными Redis settings.
+
+После завершения smoke-test приложение должно корректно освобождать ресурсы.
+
+Если отдельный файл для этого не нужен и есть более простой безопасный способ — объясни и используй его.
+
+---
+
+# Step 17 — manual verification
+
+Нужно выполнить реальную проверку.
+
+Сначала:
+
+```bash
+docker compose ps
+```
+
+Проверить, что Redis работает.
+
+Затем запустить backend:
+
+```bash
+npm run start:dev
+```
+
+Добавить тестовую job:
+
+```ts
+{
+  recipeId: 42;
+}
+```
+
+Ожидаемое поведение:
+
+```text
+Producer
+   |
+   v
+Redis
+   |
+   v
+Worker receives job
+   |
+   v
+Completed
+```
+
+Проверить:
+
+- задача добавляется;
+- worker её получает;
+- логируется ожидаемый `recipeId`;
+- задача завершается успешно;
+- Redis содержит ожидаемое состояние job либо это подтверждается через BullMQ API;
+- отсутствие parser не мешает работе очереди.
+
+После проверки убрать временные тестовые данные, если это необходимо и безопасно.
+
+Не удалять другие Redis keys вслепую.
+
+Не использовать:
+
+```bash
+FLUSHALL
+FLUSHDB
+```
+
+для очистки тестов.
+
+---
+
+# Step 18 — тесты
+
+Добавить focused tests.
+
+## Producer tests
+
+Проверить:
+
+```text
+enqueue(42)
+```
+
+вызывает:
+
+```ts
+queue.add(...)
+```
+
+с правильными:
+
+```text
+job name
+payload
+options
+```
+
+Не подключать настоящий Redis в обычных unit tests.
+
+Использовать подходящий mock.
+
+## Processor tests
+
+Проверить:
+
+- корректная job обрабатывается;
+- правильный `recipeId` читается из payload;
+- неизвестная job не завершается успешно;
+- некорректный payload обрабатывается ошибкой;
+- ошибка обработки не проглатывается.
+
+Не писать тесты на конкретный текст логов без необходимости.
+
+## Retry tests
+
+Проверить конфигурацию attempts/backoff и важное поведение при ошибке.
+
+Не создавать огромную integration-test инфраструктуру только для одной очереди.
+
+---
+
+# Step 19 — не изменять Recipe Entity
+
+На этом этапе никаких изменений в БД не требуется.
+
+Не менять:
 
 ```text
 Recipe
@@ -80,1576 +1068,105 @@ RecipeStep
 RecipeStatus
 ```
 
-Связи:
+Не создавать новую migration без реальной причины.
 
-```text
-User
- └── 1:N Recipe
-       ├── 1:N RecipeIngredient
-       └── 1:N RecipeStep
-```
-
----
-
-# Recipe
-
-Существующие поля:
-
-```text
-id
-
-title
-description
-
-sourceUrl
-imageUrl
-
-servings
-
-prepTimeMinutes
-cookTimeMinutes
-
-status
-errorMessage
-
-userId
-
-createdAt
-updatedAt
-```
-
----
-
-# RecipeIngredient
-
-```text
-id
-
-rawText
-name
-quantity
-unit
-
-position
-
-recipeId
-```
-
----
-
-# RecipeStep
-
-```text
-id
-
-text
-group
-durationMinutes
-imageUrl
-
-position
-
-recipeId
-```
-
----
-
-# RecipeStatus
-
-Уже существует:
-
-```ts
-PENDING;
-PROCESSING;
-COMPLETED;
-FAILED;
-```
-
-Не менять enum без реальной причины.
-
----
-
-# 3. Цель этапа
-
-Нужно создать backend API для работы с уже существующими рецептами пользователя.
-
-После завершения должны работать:
-
-```text
-GET    /recipes
-GET    /recipes/:id
-DELETE /recipes/:id
-```
-
-Дополнительно `GET /recipes` должен поддерживать фильтрацию по status.
-
-Например:
-
-```text
-GET /recipes
-```
-
-вернёт все Recipes текущего пользователя.
-
-А:
-
-```text
-GET /recipes?status=pending&status=processing
-```
-
-вернёт только Recipes с указанными статусами.
-
-Это позже понадобится frontend вкладке:
-
-```text
-Processing
-```
-
-для:
-
-```text
-PENDING
-PROCESSING
-```
-
----
-
-# 4. Очень важное правило ownership
-
-Recipe принадлежит User.
-
-Пользователь должен иметь доступ ТОЛЬКО к своим Recipe.
-
-Нельзя делать:
-
-```ts
-repository.findOneBy({
-  id: recipeId,
-});
-```
-
-а потом отдельно где-то надеяться проверить owner.
-
-Основные запросы должны учитывать:
-
-```text
-recipe.id
-+
-recipe.userId
-```
-
-То есть:
-
-```text
-current authenticated user
-↓
-user.id
-↓
-Recipe query
-```
-
-`userId` никогда не принимаем от frontend.
-
-Плохо:
-
-```json
-{
-  "userId": 15
-}
-```
-
-или:
-
-```text
-GET /recipes?userId=15
-```
-
-Правильно:
-
-```text
-HttpOnly JWT
-↓
-JwtAuthGuard
-↓
-@CurrentUser()
-↓
-user.id
-```
-
----
-
-# 5. Поведение при попытке получить чужой Recipe
-
-Представим:
-
-```text
-Recipe #10 принадлежит User A
-```
-
-User B делает:
-
-```text
-GET /recipes/10
-```
-
-Ответ:
-
-```text
-404 Not Found
-```
-
-а НЕ:
-
-```text
-403 Forbidden
-```
-
-То же самое для удаления.
-
-Причина:
-
-API не должен подтверждать другому пользователю существование чужого Recipe.
-
-Поэтому одинаковый response:
-
-```text
-Recipe не существует
-```
-
-и:
-
-```text
-Recipe существует, но принадлежит другому User
-```
-
-→
-
-```text
-404 Recipe not found
-```
-
----
-
-# 6. Что НЕ делаем сейчас
-
-На этом этапе НЕ реализовывать:
-
-```text
-POST /recipes
-POST /recipes/import
-PUT /recipes/:id
-PATCH /recipes/:id
-POST /recipes/:id/retry
-```
-
-Почему нет обычного:
-
-```text
-POST /recipes
-```
-
-Dishly создаёт Recipe через import flow.
-
-Будущий flow:
-
-```text
-POST /recipes/import
-↓
-Recipe PENDING
-↓
-BullMQ
-↓
-Parser
-```
-
-Он будет реализован позже.
-
-Не создавай временный endpoint ручного создания Recipe только ради тестирования.
-
----
-
-# 7. Планируемая структура
-
-Ориентировочно:
-
-```text
-src/recipes/
-├── dto/
-│   └── list-recipes-query.dto.ts
-│
-├── entities/
-│   ├── recipe.entity.ts
-│   ├── recipe-ingredient.entity.ts
-│   └── recipe-step.entity.ts
-│
-├── enums/
-│   └── recipe-status.enum.ts
-│
-├── types/
-│   └── recipe-response.types.ts
-│
-├── recipes.controller.ts
-├── recipes.service.ts
-└── recipes.module.ts
-```
-
-Не создавать отдельный custom Repository layer только ради архитектурной красоты.
-
-На текущем этапе достаточно:
-
-```text
-RecipesService
-↓
-TypeORM Repository<Recipe>
-```
-
-через:
-
-```ts
-@InjectRepository(Recipe)
-```
-
-Если фактический код показывает причину изменить структуру — сначала объясни.
-
----
-
-# 8. Как со мной работать
-
-Не реализовывай весь этап одним большим изменением.
-
-Иди блоками.
-
-Перед каждым крупным блоком напиши:
-
-## Что делаем
-
-## Почему
-
-## Какие файлы будут изменены
-
-## Что должно получиться
-
-После реализации блока:
-
-- запусти подходящие tests;
-- запусти build/lint;
-- сообщи результат;
-- обнови `apps/codex/AGENT_PROGRESS.md`.
-
-Не создавай commit без моего отдельного запроса.
-
----
-
-# Step 1 — Audit Recipes
-
-Сначала ничего не меняй.
-
-Изучи:
-
-```text
-src/recipes/recipes.module.ts
-
-src/recipes/entities/recipe.entity.ts
-src/recipes/entities/recipe-ingredient.entity.ts
-src/recipes/entities/recipe-step.entity.ts
-
-src/recipes/enums/recipe-status.enum.ts
-
-src/auth/decorators/current-user.decorator.ts
-src/auth/types/auth.types.ts
-src/auth/guards/jwt-auth.guard.ts
-```
-
-Проверь:
-
-- какие repositories уже зарегистрированы;
-- какие relations существуют;
-- какие indexes/constraints существуют;
-- что именно содержит `AuthenticatedUser`;
-- как controller должен получить current user;
-- нужна ли schema migration для этого этапа.
-
-Ожидаемый ответ:
-
-```text
-новая migration не нужна
-```
-
-потому что database schema менять не планируем.
-
-Если обнаружишь обратное — остановись и объясни причину.
-
-После аудита остановись и покажи вывод.
-
----
-
-# Step 2 — определить API contracts
-
-Перед написанием queries зафиксировать response структуры.
-
-НЕ возвращать TypeORM Entity напрямую из controller только потому, что это проще.
-
-Нужно явно определить, что API отдаёт frontend.
-
----
-
-# Recipe list item
-
-Для:
-
-```text
-GET /recipes
-```
-
-достаточно примерно:
-
-```ts
-{
-  id: number;
-
-  title: string | null;
-  sourceUrl: string;
-  imageUrl: string | null;
-
-  servings: number | null;
-  prepTimeMinutes: number | null;
-  cookTimeMinutes: number | null;
-
-  status: RecipeStatus;
-
-  createdAt: Date;
-  updatedAt: Date;
-}
-```
-
-Не возвращать в list:
-
-```text
-ingredients
-steps
-user
-userId
-```
-
-List endpoint не должен загружать полную структуру каждого Recipe.
-
----
-
-# Recipe details
-
-Для:
-
-```text
-GET /recipes/:id
-```
-
-нужно вернуть:
-
-```ts
-{
-  id;
-
-  title;
-  description;
-
-  sourceUrl;
-  imageUrl;
-
-  servings;
-  prepTimeMinutes;
-  cookTimeMinutes;
-
-  status;
-
-  createdAt;
-  updatedAt;
-
-  ingredients;
-  steps;
-}
-```
-
----
-
-# Ingredient response
-
-```ts
-{
-  id: number;
-  rawText: string;
-
-  name: string | null;
-  quantity: number | null;
-  unit: string | null;
-
-  position: number;
-}
-```
-
-Не возвращать:
-
-```text
-recipeId
-recipe
-```
-
----
-
-# Step response
-
-```ts
-{
-  id: number;
-
-  text: string;
-  group: string | null;
-
-  durationMinutes: number | null;
-  imageUrl: string | null;
-
-  position: number;
-}
-```
-
-Не возвращать:
-
-```text
-recipeId
-recipe
-```
-
----
-
-# errorMessage
-
-Существующее:
-
-```text
-Recipe.errorMessage
-```
-
-пока НЕ отдавать напрямую через public API.
-
-Причина:
-
-в будущем оно может содержать техническую информацию parser-а.
-
-User-facing import errors нужно будет спроектировать отдельно на этапе import pipeline.
-
----
-
-# Step 3 — ListRecipesQueryDto
-
-Создать query DTO для:
-
-```text
-GET /recipes
-```
-
-Нужно поддержать:
-
-```text
-GET /recipes
-```
-
-и:
-
-```text
-GET /recipes?status=pending
-```
-
-и:
-
-```text
-GET /recipes?status=pending&status=processing
-```
-
-DTO должен приводить single value и array к одному виду:
-
-```ts
-status?: RecipeStatus[];
-```
-
-Validation:
-
-```text
-каждый status должен принадлежать RecipeStatus
-```
-
-Невалидный:
-
-```text
-GET /recipes?status=random
-```
-
-должен вернуть:
-
-```text
-400 Bad Request
-```
-
-Используй уже существующий global ValidationPipe.
-
-Не писать validation вручную в controller.
-
----
-
-# Step 4 — RecipesService
-
-Создать:
-
-```text
-recipes.service.ts
-```
-
-Использовать:
-
-```ts
-Repository<Recipe>;
-```
-
-через Nest dependency injection.
-
-На текущем этапе отдельный `RecipesRepository` class не нужен.
-
----
-
-# Минимальные методы
-
-Ориентировочно:
-
-```text
-findAllForUser()
-findOneForUser()
-deleteForUser()
-```
-
-Названия можно немного изменить, если предложишь более понятные.
-
----
-
-# Step 5 — GET /recipes service logic
-
-Метод принимает:
-
-```text
-userId
-statuses?
-```
-
-Основное условие:
-
-```text
-WHERE user_id = currentUser.id
-```
-
-Если status filter передан:
-
-```text
-AND status IN (...)
-```
-
-Для TypeORM можно использовать подходящий оператор вроде:
-
-```text
-In(...)
-```
-
-если он действительно упрощает query.
-
----
-
-# Сортировка
-
-Recipes возвращать:
-
-```text
-createdAt DESC
-```
-
-То есть новые Recipes первыми.
-
----
-
-# Важно
-
-List query НЕ должен загружать:
-
-```text
-ingredients
-steps
-user
-```
-
-Никаких:
-
-```text
-relations: [...]
-```
-
-для обычного list.
-
-Это лишние данные и лишняя работа БД.
-
----
-
-# Step 6 — GET /recipes controller
-
-Создать:
-
-```text
-RecipesController
-```
-
-Route:
-
-```text
-GET /recipes
-```
-
-Controller получает:
-
-```ts
-@CurrentUser()
-```
-
-и:
-
-```ts
-@Query()
-```
-
-Затем вызывает service.
-
-Не принимать `userId` из query/body.
-
-Controller не содержит TypeORM query.
-
-Пример ответственности:
-
-```text
-HTTP input
-↓
-CurrentUser
-↓
-RecipesService
-↓
-response
-```
-
----
-
-# Step 7 — GET /recipes/:id
-
-Создать:
-
-```text
-GET /recipes/:id
-```
-
-ID должен быть positive integer.
-
-Использовать стандартные возможности Nest, например appropriate pipe.
-
-Не писать:
-
-```ts
-Number(id);
-```
-
-вручную без validation.
-
----
-
-# Service query
-
-Recipe должен искаться одновременно по:
-
-```text
-id
-userId
-```
-
-То есть концептуально:
-
-```sql
-WHERE recipes.id = :id
-AND recipes.user_id = :userId
-```
-
----
-
-# Relations
-
-Для details endpoint загрузить:
-
-```text
-ingredients
-steps
-```
-
-Не загружать `user`, потому что frontend он здесь не нужен.
-
----
-
-# Порядок ingredients
-
-Обязательно:
-
-```text
-position ASC
-```
-
----
-
-# Порядок steps
-
-Обязательно:
-
-```text
-position ASC
-```
-
-Нельзя полагаться:
-
-```text
-на id
-на insertion order
-на случайный PostgreSQL order
-```
-
----
-
-# Если Recipe не найден
-
-В том числе если он принадлежит другому User:
-
-```text
-404 Not Found
-```
-
-Например:
-
-```json
-{
-  "message": "Recipe not found"
-}
-```
-
-Не делать разные сообщения для:
-
-```text
-нет Recipe
-```
-
-и:
-
-```text
-чужой Recipe
-```
-
----
-
-# Step 8 — DELETE /recipes/:id
-
-Добавить:
-
-```text
-DELETE /recipes/:id
-```
-
-Endpoint protected автоматически global auth guard.
-
-Controller получает:
-
-```text
-currentUser.id
-recipe id
-```
-
----
-
-# Ownership
-
-DELETE должен учитывать одновременно:
-
-```text
-id
-userId
-```
-
-Если:
-
-```text
-0 rows affected
-```
-
-вернуть:
-
-```text
-404 Recipe not found
-```
-
----
-
-# Successful response
-
-Использовать:
-
-```text
-204 No Content
-```
-
-Не возвращать deleted Entity без необходимости.
-
----
-
-# Database cascade
-
-Не удалять вручную:
-
-```text
-RecipeIngredient
-RecipeStep
-```
-
-У нас уже существуют:
-
-```text
-ON DELETE CASCADE
-```
-
-Database должна сама удалить child records.
-
-То есть:
-
-```text
-DELETE Recipe
-↓
-PostgreSQL FK cascade
-↓
-ingredients deleted
-steps deleted
-```
-
-Не писать три отдельных DELETE query.
-
----
-
-# Step 9 — явное mapping Entity → API response
-
-Не возвращать Entity автоматически.
-
-Сделать простой явный mapping.
-
-Например внутри service или небольшого отдельного helper.
-
-Не создавать:
-
-```text
-AutoMapper
-generic mapper framework
-BaseResponseMapper<T>
-```
-
-для четырёх объектов.
-
-Нужен обычный понятный TypeScript.
-
----
-
-# Почему mapping важен
-
-Entity содержит persistence детали:
-
-```text
-userId
-relations
-errorMessage
-```
-
-API contract — другая ответственность.
-
-Это позволит позже менять database model, не ломая frontend автоматически.
-
----
-
-# Step 10 — никаких N+1 queries
-
-Для:
-
-```text
-GET /recipes
-```
-
-должен быть один нормальный query.
-
-Не делать:
-
-```text
-SELECT Recipes
-
-for each Recipe:
-  SELECT Ingredients
-  SELECT Steps
-```
-
-List вообще не требует ingredients/steps.
-
----
-
-Для:
-
-```text
-GET /recipes/:id
-```
-
-можно загрузить relations одним подходящим TypeORM query.
-
-Главное — не создавать ручной N+1 flow.
-
----
-
-# Step 11 — Tests
-
-Добавить focused tests.
-
-Не писать тесты ради количества.
-
-Обязательно проверить ключевую бизнес-логику.
-
----
-
-## List recipes
-
-Проверить:
-
-```text
-возвращаются только Recipes текущего User
-```
-
-и:
-
-```text
-status filter применяется
-```
-
-и:
-
-```text
-сортировка createdAt DESC
-```
-
----
-
-## Get recipe
-
-Проверить:
-
-```text
-свой Recipe → success
-```
-
-```text
-несуществующий Recipe → 404
-```
-
-```text
-Recipe другого User → 404
-```
-
----
-
-## Relations
-
-Проверить, что details возвращает:
-
-```text
-ingredients position ASC
-steps position ASC
-```
-
----
-
-## Delete
-
-Проверить:
-
-```text
-свой Recipe → delete success
-```
-
-```text
-чужой Recipe → 404
-```
-
-```text
-несуществующий Recipe → 404
-```
-
----
-
-# Какой вид тестов выбрать
-
-Сначала оцени текущую test architecture.
-
-Не создавай огромную database integration infrastructure только ради этого этапа.
-
-Если unit tests `RecipesService` с repository mock достаточно хорошо проверяют service query logic — используй их.
-
-Но ownership также обязательно проверить реальным HTTP/API flow вручную.
-
----
-
-# Step 12 — Manual API verification
-
-После реализации провести manual verification через настоящий backend + PostgreSQL.
-
-Так как публичного:
-
-```text
-POST /recipes
-```
-
-ещё нет, тестовые Recipes временно создать напрямую в PostgreSQL.
-
-Не создавать специальный dev endpoint.
-
----
-
-# Сценарий проверки
-
-Создать:
-
-```text
-User A
-User B
-```
-
-через существующий auth API.
-
-Создать в PostgreSQL:
-
-```text
-Recipe A1 → User A
-Recipe A2 → User A
-Recipe B1 → User B
-```
-
-Также создать Ingredients/Steps для одного Recipe.
-
----
-
-# Проверить User A
-
-```text
-GET /recipes
-```
-
-должен вернуть:
-
-```text
-A1
-A2
-```
-
-и НЕ:
-
-```text
-B1
-```
-
----
-
-Проверить:
-
-```text
-GET /recipes/{A1}
-```
-
-→ `200`.
-
----
-
-Проверить:
-
-```text
-GET /recipes/{B1}
-```
-
-под cookie User A:
-
-```text
-404
-```
-
----
-
-Проверить:
-
-```text
-DELETE /recipes/{B1}
-```
-
-под User A:
-
-```text
-404
-```
-
-и B1 должен остаться в БД.
-
----
-
-# Проверить status filter
-
-Например:
-
-```text
-A1 = pending
-A2 = completed
-```
-
-Запрос:
-
-```text
-GET /recipes?status=pending
-```
-
-должен вернуть только A1.
-
-Запрос:
-
-```text
-GET /recipes?status=pending&status=processing
-```
-
-должен корректно принять несколько statuses.
-
----
-
-# Проверить invalid filter
-
-```text
-GET /recipes?status=hello
-```
-
-→
-
-```text
-400
-```
-
----
-
-# Step 13 — проверить cascade delete
-
-Для Recipe создать:
-
-```text
-2 ingredients
-2 steps
-```
-
-Удалить Recipe через:
-
-```text
-DELETE /recipes/:id
-```
-
-После этого напрямую проверить PostgreSQL:
-
-```text
-recipes row отсутствует
-recipe_ingredients rows отсутствуют
-recipe_steps rows отсутствуют
-```
-
-Это должно произойти через существующий:
-
-```text
-ON DELETE CASCADE
-```
-
-а не service logic.
-
----
-
-# Step 14 — auth regression check
-
-Recipes implementation не должна сломать Auth.
-
-После изменений проверить:
-
-```text
-GET /health
-→ 200 без cookie
-```
-
-```text
-GET /recipes
-→ 401 без cookie
-```
-
-```text
-GET /recipes
-→ 200 с valid cookie
-```
-
-Также существующий:
-
-```text
-GET /auth/current
-```
-
-должен продолжать работать.
-
-Не переименовывать его на этом этапе.
-
----
-
-# Step 15 — schema regression
-
-На этом этапе database schema менять не планируется.
-
-Проверить:
-
-```bash
-npm run migration:show
-```
-
-Initial migration должна оставаться applied.
-
-Не редактировать:
+Не редактировать существующую:
 
 ```text
 CreateInitialSchema
 ```
 
-Если Entity не менялись, новая migration не нужна.
+Бизнес-логика импорта будет реализована позже.
 
 ---
 
-# Step 16 — README
+# Step 20 — README
 
-Не нужно описывать весь Recipes API подробно.
+Обновить README минимально.
 
-Если README уже имеет API section — можно добавить очень кратко:
+Нужно объяснить:
 
-```text
-GET /recipes
-GET /recipes/:id
-DELETE /recipes/:id
-```
+- что Redis используется для BullMQ;
+- какие Redis env variables нужны;
+- как запустить Redis;
+- как запустить backend;
+- как проверить очередь через smoke-test, если он добавлен.
 
-Если такой секции нет и добавление будет лишним — не менять README только ради галочки.
+Не писать большую документацию на десятки страниц.
 
 ---
 
-# Step 17 — что НЕ входит в этот этап
+# Step 21 — что НЕ входит в этот этап
 
 Категорически не реализовывать:
 
 ```text
 POST /recipes/import
-```
-
-или:
-
-```text
-POST /recipes
-```
-
-Также не делать:
-
-```text
-BullMQ
-Redis queue integration
-Worker
-Processor
-
-HTML fetch
-Good Food parser
-JSON-LD
-Schema.org parsing
-
-Retry
 POST /recipes/:id/retry
 
-Recipe edit
-PATCH /recipes/:id
+HTML fetcher
+JSON-LD extractor
+Good Food parser
+AI parser
 
-Frontend recipes page
-Frontend cards
+создание Recipe через API
+обновление Recipe.status
+сохранение Ingredients
+сохранение Steps
+
+Frontend changes
+React Query
+Recipe cards
 Add Recipe modal
-
+Polling
 WebSockets
 SSE
-polling
-
-AI
-shopping list
+Shopping list
 ```
+
+Следующие этапы:
+
+```text
+Этап 6 — Good Food Parser
+
+Этап 7 — Queue + Parser + PostgreSQL integration
+```
+
+Не переходить к ним автоматически.
 
 ---
 
-# Step 18 — архитектурные правила
+# Step 22 — финальные проверки
 
-## Controller
-
-Не содержит:
-
-```text
-TypeORM queries
-Repository access
-ownership business logic
-```
-
-Controller:
-
-```text
-HTTP
-↓
-Service
-```
-
----
-
-## Service
-
-Отвечает за:
-
-```text
-recipe queries
-ownership
-not-found behavior
-mapping
-```
-
----
-
-## Repository
-
-На текущем этапе используем стандартный:
-
-```ts
-Repository<Recipe>;
-```
-
-через TypeORM.
-
-Не создавать отдельный repository class без реальной необходимости.
-
----
-
-## DTO != Entity
-
-Query validation:
-
-```text
-DTO
-```
-
-Database model:
-
-```text
-Entity
-```
-
-API response:
-
-```text
-explicit response type
-```
-
-Не смешивать эти роли.
-
----
-
-# Step 19 — Pagination
-
-Pagination сейчас НЕ добавлять.
-
-Для текущего MVP сначала нужен рабочий Recipes API.
-
-Зафиксировать как будущее улучшение:
-
-```text
-pagination понадобится, если количество Recipes станет большим
-```
-
-Не вводить сейчас:
-
-```text
-page
-cursor
-limit
-totalCount
-```
-
-без product requirement.
-
----
-
-# Step 20 — Search / sorting
-
-Не добавлять:
-
-```text
-search
-categories
-tags
-custom sorting
-```
-
-Единственная сортировка сейчас:
-
-```text
-createdAt DESC
-```
-
-Единственная фильтрация:
-
-```text
-status
-```
-
----
-
-# Step 21 — Error handling
-
-Не отдавать raw TypeORM/PostgreSQL errors.
-
-Expected business errors должны быть:
-
-```text
-400 invalid query
-401 authentication required
-404 recipe not found
-```
-
-Unexpected database errors пусть обрабатываются стандартным Nest exception flow и логированием.
-
-Не превращать любой database error в `404`.
-
----
-
-# Step 22 — Финальные проверки
-
-Обязательно выполнить в backend:
+Обязательно выполнить:
 
 ```bash
 npm run build
 npm run lint
 npm test
+```
+
+Из:
+
+```text
+apps/backend
+```
+
+Также проверить:
+
+```bash
 npm run migration:show
 ```
 
-Из root:
+Убедиться, что миграции не затронуты.
+
+Из корня проекта:
 
 ```bash
 docker compose ps
 ```
+
+Проверить реальный smoke-test очереди.
 
 Проверить:
 
@@ -1658,171 +1175,117 @@ git status
 git diff
 ```
 
-Frontend build запускать не обязательно, если frontend действительно не изменялся.
+Не утверждать, что тест прошёл, если он не запускался.
+
+Если запуск невозможен из-за окружения — объясни конкретную причину.
 
 ---
 
-# Step 23 — Definition of Done
+# 23. Definition of Done
 
-Этап готов только если:
+Этап 5 считается завершённым, если:
 
-```text
-[ ] RecipesService создан
-
-[ ] RecipesController создан
-
-[ ] RecipesModule регистрирует service/controller
-
-[ ] GET /recipes работает
-
-[ ] GET /recipes требует authentication
-
-[ ] GET /recipes возвращает только Recipes текущего User
-
-[ ] GET /recipes не загружает ingredients/steps
-
-[ ] Recipes сортируются createdAt DESC
-
-[ ] status query validation работает
-
-[ ] один status работает
-
-[ ] несколько statuses работают
-
-[ ] invalid status → 400
-
-[ ] GET /recipes/:id работает
-
-[ ] recipe id валидируется как positive integer
-
-[ ] GET details возвращает ingredients
-
-[ ] GET details возвращает steps
-
-[ ] ingredients отсортированы position ASC
-
-[ ] steps отсортированы position ASC
-
-[ ] чужой Recipe → 404
-
-[ ] несуществующий Recipe → 404
-
-[ ] DELETE /recipes/:id работает
-
-[ ] delete success → 204
-
-[ ] нельзя удалить чужой Recipe
-
-[ ] delete чужого Recipe → 404
-
-[ ] DB ON DELETE CASCADE удаляет ingredients
-
-[ ] DB ON DELETE CASCADE удаляет steps
-
-[ ] userId никогда не принимается от frontend
-
-[ ] Entities не возвращаются напрямую как API contract
-
-[ ] userId не утечёт в response
-
-[ ] raw errorMessage не утечёт в response
-
-[ ] N+1 queries не созданы
-
-[ ] новые migrations без причины не создавались
-
-[ ] initial migration не редактировалась
-
-[ ] Auth продолжает работать
-
-[ ] /health остаётся public
-
-[ ] focused tests проходят
-
-[ ] manual ownership flow проверен с двумя Users
-
-[ ] backend build проходит
-
-[ ] backend lint проходит
-
-[ ] backend tests проходят
-
-[ ] frontend не изменялся
-
-[ ] BullMQ не подключался
-
-[ ] Parser не реализовывался
-```
+- [ ] BullMQ установлен и подключён к NestJS.
+- [ ] Используется `@nestjs/bullmq`, а не старый Bull.
+- [ ] Redis host/port берутся из env.
+- [ ] Redis env variables валидируются.
+- [ ] Redis persistence настроена и проверена в доступных пределах.
+- [ ] Очередь `recipe-import` зарегистрирована.
+- [ ] Job `import-recipe` имеет единый типизированный payload.
+- [ ] Producer создан.
+- [ ] Producer использует `queue.add()`.
+- [ ] Processor создан.
+- [ ] Processor использует `WorkerHost`.
+- [ ] Processor получает правильный `recipeId`.
+- [ ] Job успешно завершается.
+- [ ] Ошибки не проглатываются.
+- [ ] Completed/Failed events логируются.
+- [ ] Retry/backoff настроены.
+- [ ] Проверено поведение подключений и остановки приложения.
+- [ ] Unit tests проходят.
+- [ ] Реальный smoke-test с Redis проходит.
+- [ ] Backend build проходит.
+- [ ] Backend lint проходит.
+- [ ] Существующие tests проходят.
+- [ ] Миграции не изменены.
+- [ ] Recipe Entity не изменена.
+- [ ] Auth и Recipes API не сломаны.
+- [ ] Frontend не изменялся.
+- [ ] Parser не реализован.
+- [ ] Новые production HTTP endpoints не создавались.
 
 ---
 
-# Step 24 — финальный review
+# 24. Финальный review
 
-После завершения НЕ переходи автоматически к следующему этапу.
+После завершения не переходи к Этапу 6.
 
-Дай отчёт:
+Дай отчёт.
 
 ## Что изменено
 
-Перечисли файлы.
+Перечисли файлы и назначение изменений.
 
-## API
+## Архитектура
 
-Покажи итоговые endpoints:
+Покажи итоговую цепочку:
 
 ```text
-GET    /recipes
-GET    /recipes/:id
-DELETE /recipes/:id
+Producer
+   |
+   v
+BullMQ
+   |
+   v
+Redis
+   |
+   v
+Processor
 ```
 
-## Ownership
+## Configuration
 
-Опиши результат проверки User A / User B.
+Объясни, откуда берутся Redis host/port.
 
-## Queries
+## Retry
 
-Укажи:
-
-- что list не загружает relations;
-- как details загружает relations;
-- как обеспечивается ordering.
-
-## Database
-
-Подтверди cascade delete.
+Покажи настройки и объясни поведение при ошибке.
 
 ## Tests
 
-Какие tests выполнены.
+Укажи, какие тесты реально запускались.
+
+## Manual verification
+
+Опиши результат реального добавления и обработки job.
 
 ## MUST FIX
 
-Блокирующие проблемы.
+Проблемы, блокирующие следующий этап.
 
 ## SHOULD IMPROVE
 
-Неблокирующие улучшения.
+Желательные неблокирующие изменения.
 
 ## OPTIONAL
 
-То, что сознательно оставлено на будущее.
+То, что можно оставить на будущее.
 
 ## VERDICT
 
-Однозначно:
+Однозначно укажи:
 
 ```text
-Этап 4 готов к переходу на Этап 5
+Этап 5 готов к переходу на Этап 6
 ```
 
 или:
 
 ```text
-Этап 4 пока не готов
+Этап 5 пока не готов
 ```
 
-с причиной.
+С объяснением причины.
 
 Обнови:
 
@@ -1830,37 +1293,16 @@ DELETE /recipes/:id
 apps/codex/AGENT_PROGRESS.md
 ```
 
-так, чтобы следующая Codex session могла продолжить работу без истории предыдущего чата.
+Зафиксируй там:
 
----
+- новые зависимости;
+- архитектурные решения;
+- изменённые файлы;
+- результаты проверок;
+- особенности Redis;
+- следующий этап.
 
-# Следующий этап
-
-После успешного review будет:
-
-**Этап 5 — BullMQ + Redis Recipe Queue**
-
-На нём будет создана очередь:
-
-```text
-recipe-import
-```
-
-с job:
-
-```text
-import-recipe
-```
-
-и payload:
-
-```ts
-{
-  recipeId: number;
-}
-```
-
-Но сейчас ничего из этого не реализовывать.
+Не создавай Git commit без моего разрешения.
 
 ---
 
@@ -1868,17 +1310,18 @@ import-recipe
 
 Начни только с:
 
-**Step 1 — Audit Recipes.**
+**Step 1 — аудит Redis и текущего backend.**
 
-Пока не меняй код.
+Пока ничего не меняй.
 
-После аудита покажи мне:
+Сначала покажи:
 
-1. текущее состояние `RecipesModule`;
-2. текущие Recipe relations;
-3. как будет обеспечиваться ownership;
-4. нужен ли schema change;
-5. предлагаемый список новых файлов;
-6. видишь ли ты архитектурные проблемы, которые блокируют этап.
+1. какие зависимости нужно установить;
+2. какие Redis-настройки уже существуют;
+3. как настроить Redis connection;
+4. куда зарегистрировать BullMQ;
+5. предлагаемую структуру файлов;
+6. какие проблемы ты обнаружил;
+7. с какого изменения предлагаешь начать.
 
-После этого остановись.
+После аудита остановись и дождись моего ответа.

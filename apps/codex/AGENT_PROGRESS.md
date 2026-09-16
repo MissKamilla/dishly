@@ -1,11 +1,11 @@
 # Рабочие заметки Codex по Dishly
 
-Последнее обновление: 2026-09-15.
+Последнее обновление: 2026-09-16.
 
 ## Текущий контекст
 
 - Проект: Dishly.
-- Текущий этап: Этап 4 - Recipes Backend API без Parser и Queue.
+- Текущий этап: Этап 5 - BullMQ + Redis Recipe Queue.
 - Текущая ветка: `feature/recipes-api`.
 - Последние коммиты:
   - `69fdfee Merge pull request #1 from MissKamilla/feature/project-bootstrap`
@@ -13,19 +13,59 @@
   - `d7012f4 feat: scaffold React frontend`
   - `2d8995d chore: configure TypeORM and Redis infrastructure`
   - `a7ee82b chore: add PostgreSQL docker compose service`
-- Главный принцип этапа: реализовать Recipes Backend API только для существующих recipe records, с обязательным ownership через `currentUser.id`.
-- Следующий шаг по плану: Этап 5 - BullMQ + Redis Recipe Queue, только после явной команды разработчика.
-- Не переходить к следующему этапу без явной команды разработчика.
+- Главный принцип этапа: добавить инфраструктуру очереди импорта рецептов через BullMQ и Redis без parser/import API/business status updates.
+- Следующий шаг по плану: Этап 5 Step 5 - зарегистрировать BullMQ в NestJS.
+- Не переходить к следующему шагу без явной команды разработчика.
 
 ## На чем остановились
 
 Продолжать нужно с:
 
 ```text
-Этап 4 Step 24 завершен - финальный review пройден
+Этап 5 Step 4 завершен - Redis persistence настроен в Docker Compose
 ```
 
-Причина: Recipes Backend API для существующих recipe records реализован, проверен unit/manual/final checks, блокирующих проблем нет.
+Причина: Redis теперь описан с AOF persistence и named Docker volume для данных очереди.
+
+Ключевые выводы Этапа 5:
+
+- Step 1 аудит Redis и backend завершен:
+  - Redis уже описан в `docker-compose.yml` как `redis:7-alpine`;
+  - локальный host port Redis: `${REDIS_PORT:-6380}`, container port: `6379`;
+  - Redis healthcheck использует `redis-cli ping`;
+  - Redis persistent volume и AOF persistence пока не настроены;
+  - BullMQ/queue/processor infrastructure ранее отсутствовали;
+  - backend env validation была минимальной и не проверяла Redis variables;
+  - логичное место для централизованного BullMQ connection config: `AppModule`;
+  - логичное место для `recipe-import` queue registration: `RecipesModule`;
+  - предложенная ветка: `feature/recipe-import-queue`.
+- Step 2 установка BullMQ завершена разработчиком:
+  - добавлены dependencies `@nestjs/bullmq@12.0.0` и `bullmq@6.3.6`;
+  - `@nestjs/bull` и `bull` не устанавливались;
+  - `npm ls @nestjs/bullmq bullmq @nestjs/common @nestjs/core` прошел без peer dependency конфликтов;
+  - `npm run build` из `apps/backend` прошел успешно;
+  - `npm test` из `apps/backend` прошел успешно: 7 suites, 35 tests.
+- Step 3 Redis environment variables завершен:
+  - `apps/backend/.env.example` получил `REDIS_HOST=localhost` и `REDIS_PORT=6380`;
+  - локальный ignored `apps/backend/.env` получил `REDIS_HOST=localhost` и `REDIS_PORT=6380`;
+  - `validateEnvironment` теперь требует непустые `REDIS_HOST` и `REDIS_PORT`;
+  - `REDIS_PORT` валидируется как TCP port `1-65535`;
+  - invalid examples `abc`, `0`, `70000`, `6380abc` отклоняются;
+  - добавлен focused test `apps/backend/src/config/validate-environment.spec.ts`;
+  - `npm test -- validate-environment.spec.ts` из `apps/backend` прошел успешно: 1 suite, 8 tests;
+  - `npm run build` из `apps/backend` прошел успешно;
+  - `npm run lint` из `apps/backend` прошел успешно.
+- Step 4 Redis persistence завершен:
+  - перед изменением runtime Redis config показывал `appendonly no` и `maxmemory-policy noeviction`;
+  - `docker-compose.yml` для Redis получил command `redis-server --appendonly yes`;
+  - добавлен named volume `redis_data`;
+  - Redis data directory `/data` теперь монтируется в `redis_data`;
+  - PostgreSQL configuration не менялась;
+  - `docker compose down -v`, `FLUSHALL`, `FLUSHDB` не выполнялись;
+  - `docker compose config` прошел успешно и показал `dishly_redis_data`;
+  - уже запущенный Redis container остается на старом runtime config до пересоздания контейнера;
+  - `npm run build` из `apps/backend` прошел успешно;
+  - `npm test -- validate-environment.spec.ts` из `apps/backend` прошел успешно: 1 suite, 8 tests.
 
 Ключевые выводы Этапа 4:
 
