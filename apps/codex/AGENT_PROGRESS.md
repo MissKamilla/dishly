@@ -14,7 +14,7 @@
   - `2d8995d chore: configure TypeORM and Redis infrastructure`
   - `a7ee82b chore: add PostgreSQL docker compose service`
 - Главный принцип этапа: добавить инфраструктуру очереди импорта рецептов через BullMQ и Redis без parser/import API/business status updates.
-- Следующий шаг по плану: Этап 5 Step 5 - зарегистрировать BullMQ в NestJS.
+- Следующий шаг по плану: Этап 5 Step 8 - создать producer для добавления import job.
 - Не переходить к следующему шагу без явной команды разработчика.
 
 ## На чем остановились
@@ -22,10 +22,10 @@
 Продолжать нужно с:
 
 ```text
-Этап 5 Step 4 завершен - Redis persistence настроен в Docker Compose
+Этап 5 Step 7 завершен - добавлен единый контракт job
 ```
 
-Причина: Redis теперь описан с AOF persistence и named Docker volume для данных очереди.
+Причина: имя очереди, имя job и payload type теперь описаны в одном queue contract.
 
 Ключевые выводы Этапа 5:
 
@@ -66,6 +66,39 @@
   - уже запущенный Redis container остается на старом runtime config до пересоздания контейнера;
   - `npm run build` из `apps/backend` прошел успешно;
   - `npm test -- validate-environment.spec.ts` из `apps/backend` прошел успешно: 1 suite, 8 tests.
+- Step 5 BullMQ NestJS registration завершен:
+  - изучена официальная NestJS BullMQ integration: используется `@nestjs/bullmq`, `BullModule.forRootAsync`, option `connection`;
+  - `AppModule` импортирует `BullModule`;
+  - `BullModule.forRootAsync` получает `ConfigService`;
+  - Redis `host` берется из `REDIS_HOST`;
+  - Redis `port` берется из `REDIS_PORT` и преобразуется в number;
+  - значения `localhost`/`6379` не хардкодились;
+  - конкретная очередь `recipe-import` пока не регистрировалась, это Step 6;
+  - `npm run build` из `apps/backend` прошел успешно;
+  - `npm test -- validate-environment.spec.ts` из `apps/backend` прошел успешно: 1 suite, 8 tests;
+  - `npm run lint` из `apps/backend` прошел успешно.
+- Step 6 queue registration завершен:
+  - создан `apps/backend/src/recipes/queue/recipe-import.contract.ts`;
+  - добавлен constant `RECIPE_IMPORT_QUEUE = 'recipe-import'`;
+  - `RecipesModule` импортирует `BullModule`;
+  - `RecipesModule` регистрирует очередь через `BullModule.registerQueue({ name: RECIPE_IMPORT_QUEUE })`;
+  - Redis connection settings не дублировались в `RecipesModule`;
+  - отдельный generic `QueueModule` не создавался;
+  - producer, processor и job payload type пока не создавались;
+  - `npm run build` из `apps/backend` прошел успешно;
+  - `npm test -- recipes.controller.spec.ts recipes.service.spec.ts` из `apps/backend` прошел успешно: 2 suites, 12 tests;
+  - `npm run lint` из `apps/backend` прошел успешно.
+- Step 7 job payload contract завершен:
+  - файл с одной константой `recipe-import.constants.ts` удален как излишне мелкий;
+  - единый queue contract находится в `apps/backend/src/recipes/queue/recipe-import.contract.ts`;
+  - добавлен constant `IMPORT_RECIPE_JOB = 'import-recipe'`;
+  - добавлен interface `ImportRecipeJobData` с единственным полем `recipeId: number`;
+  - payload не содержит `userId`, `sourceUrl`, `title`, `ingredients`, `steps`, `status`;
+  - `RecipesModule` импортирует `RECIPE_IMPORT_QUEUE` из contract-файла;
+  - runtime validation payload будет добавлена в processor на следующих шагах;
+  - `npm run build` из `apps/backend` прошел успешно;
+  - `npm test -- recipes.controller.spec.ts recipes.service.spec.ts` из `apps/backend` прошел успешно: 2 suites, 12 tests;
+  - `npm run lint` из `apps/backend` прошел успешно.
 
 Ключевые выводы Этапа 4:
 
