@@ -34,8 +34,11 @@ export class RecipeImportProcessor extends WorkerHost {
 
   @OnWorkerEvent('failed')
   onFailed(job: Job<unknown> | undefined, error: Error): void {
+    const attemptsMade = job?.attemptsMade ?? 0;
+    const attempts = job?.opts.attempts ?? 1;
+
     this.logger.error(
-      `Recipe import job ${job?.id ?? 'unknown'} failed: ${error.message}`,
+      `Recipe import job ${job?.id ?? 'unknown'} attempt ${attemptsMade}/${attempts} failed: ${error.message}`,
       error.stack,
     );
   }

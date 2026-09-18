@@ -30,6 +30,12 @@ export class RecipeImportQueue {
           type: 'exponential',
           delay: 1000,
         },
+        removeOnComplete: {
+          count: 1000,
+        },
+        removeOnFail: {
+          count: 5000,
+        },
       },
     );
   }

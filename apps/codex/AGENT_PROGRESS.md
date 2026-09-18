@@ -14,7 +14,7 @@
   - `2d8995d chore: configure TypeORM and Redis infrastructure`
   - `a7ee82b chore: add PostgreSQL docker compose service`
 - Главный принцип этапа: добавить инфраструктуру очереди импорта рецептов через BullMQ и Redis без parser/import API/business status updates.
-- Следующий шаг по плану: Этап 5 Step 16 - подготовить безопасный queue smoke-test.
+- Следующий шаг по плану: Этап 6 - Good Food Parser, только после отдельной команды разработчика.
 - Не переходить к следующему шагу без явной команды разработчика.
 
 ## На чем остановились
@@ -22,10 +22,10 @@
 Продолжать нужно с:
 
 ```text
-Этап 5 Step 15 завершен - graceful shutdown настроен и проверен
+Этап 5 завершен - BullMQ + Redis Recipe Queue готова
 ```
 
-Причина: Nest shutdown hooks запускают встроенное корректное закрытие BullMQ Queue и Worker.
+Причина: Definition of Done выполнен, финальные проверки и реальный Redis smoke-test прошли.
 
 Ключевые выводы Этапа 5:
 
@@ -183,6 +183,111 @@
   - `npm test -- recipe-import.queue.spec.ts` из `apps/backend` прошел успешно: 1 suite, 2 tests;
   - `npm run build` из `apps/backend` прошел успешно;
   - `npm run lint` из `apps/backend` прошел успешно.
+- Step 16 safe smoke-test завершен:
+  - создан `src/scripts/queue-smoke.ts`;
+  - добавлена npm-команда `queue:smoke` через Nest CLI entry file;
+  - script создает Nest application context из настоящего `AppModule`;
+  - существующий `RecipeImportQueue` получается через dependency injection;
+  - script добавляет одну `import-recipe` job с payload `{ recipeId: 42 }`;
+  - отдельный `new Queue(...)`, hardcoded Redis connection и HTTP endpoint не добавлялись;
+  - ID добавленной job логируется через NestJS `Logger`;
+  - application context всегда закрывается через `finally`, включая enqueue failure;
+  - ошибка не проглатывается: логируется и выставляет ненулевой process exit code;
+  - script успешно компилируется в `dist/scripts/queue-smoke.js`;
+  - реальный запуск script оставлен Step 17, чтобы не выполнять manual verification раньше отдельного шага;
+  - `npm test -- recipe-import.queue.spec.ts` из `apps/backend` прошел успешно: 1 suite, 2 tests;
+  - `npm run build` из `apps/backend` прошел успешно;
+  - `npm run lint` из `apps/backend` прошел успешно.
+- Step 17 manual queue verification завершен:
+  - `docker compose ps` подтвердил healthy PostgreSQL и Redis;
+  - Redis доступен на ожидаемом host port `6380`;
+  - backend успешно запущен на временном порту `3015` с зарегистрированными Queue и Worker;
+  - `npm run queue:smoke` завершился с exit code `0` и добавил job ID `1`;
+  - producer отправил job name `import-recipe` с payload `{ recipeId: 42 }`;
+  - backend worker залогировал `Processing recipe import job 1 for recipe 42`;
+  - completed listener залогировал `Recipe import job 1 completed`;
+  - Redis sorted set `bull:recipe-import:completed` содержит job ID `1`;
+  - Redis job hash подтверждает name `import-recipe`, payload `{"recipeId":42}` и заполненный `finishedOn`;
+  - отсутствие parser и Recipe database operations не помешало успешной обработке;
+  - `FLUSHALL`, `FLUSHDB` и удаление чужих Redis keys не выполнялись;
+  - единственная completed smoke job сохранена как проверяемый результат до настройки retention policy;
+  - smoke application context и backend завершились без зависших connections.
+- Step 18 focused queue tests завершен:
+  - существующий producer spec проверяет job name `import-recipe`, payload `{ recipeId: 42 }` и возврат результата `queue.add()`;
+  - producer spec проверяет `attempts: 3` и exponential backoff с delay `1000`;
+  - producer spec проверяет, что ошибка `queue.add()` не проглатывается;
+  - добавлен `recipe-import.processor.spec.ts`;
+  - processor spec проверяет успешную обработку корректной job и чтение `recipeId: 42`;
+  - unknown job name приводит к исключению и не логируется как успешная обработка;
+  - invalid payload cases включают `undefined`, `null`, отсутствующий ID, zero, negative, fractional и string recipeId;
+  - validation exceptions доходят до вызывающего кода и не проглатываются;
+  - тест проверяет только смысловой фрагмент лога с recipe ID, без жесткой привязки ко всему тексту;
+  - настоящий Redis в unit tests не подключается;
+  - ESM BullMQ decorators локально замоканы без изменения глобальной Jest configuration;
+  - `npm test -- recipe-import.queue.spec.ts recipe-import.processor.spec.ts` прошел успешно: 2 suites, 11 tests;
+  - `npm run build` из `apps/backend` прошел успешно;
+  - `npm run lint` из `apps/backend` прошел успешно.
+- Step 19 database scope audit завершен:
+  - queue и smoke-test code не импортируют `Recipe`, `RecipeIngredient`, `RecipeStep` или `RecipeStatus`;
+  - queue code не использует TypeORM repositories и не выполняет database operations;
+  - Recipe entities и business statuses на текущем этапе не изменялись;
+  - новых migrations не создавалось;
+  - существующая `1788879733493-CreateInitialSchema.ts` не редактировалась;
+  - production code не менялся, поскольку шаг является проверкой scope boundaries.
+- Step 20 README завершен:
+  - первоначально корневой `README.md` был минимально дополнен Redis/BullMQ и smoke-test инструкциями;
+  - по решению разработчика эти изменения полностью удалены, чтобы не утяжелять README;
+  - README возвращен к содержанию до Step 20, другие его разделы не менялись.
+- Step 21 excluded scope audit завершен:
+  - `POST /recipes/import` и `POST /recipes/:id/retry` не добавлялись;
+  - HTML fetcher, JSON-LD extractor, Good Food parser и AI parser не реализовывались;
+  - queue processor не создает и не обновляет Recipe, Ingredients или Steps;
+  - queue processor не меняет `RecipeStatus`;
+  - frontend queue/import changes, cards, modal, polling, WebSockets и SSE не добавлялись;
+  - существующий frontend health query и RecipeStatus enum/tests относятся к предыдущим этапам и не изменялись;
+  - к этапам 6 и 7 переход не выполнялся;
+  - production code в рамках Step 21 не менялся.
+- Step 22 final checks завершен:
+  - `npm run build` из `apps/backend` прошел успешно;
+  - `npm run lint` из `apps/backend` прошел успешно;
+  - полный `npm test` прошел успешно: 10 suites, 54 tests;
+  - `npm run migration:show` прошел успешно и показывает только примененную `CreateInitialSchema1788879733493`;
+  - `docker compose ps` подтвердил healthy PostgreSQL и Redis;
+  - backend успешно запущен на временном порту `3015` для финального smoke-test;
+  - `npm run queue:smoke` завершился с exit code `0` и создал job ID `2` с recipe ID `42`;
+  - processor залогировал начало обработки и completion job ID `2`;
+  - Redis подтвердил job ID `2` в `bull:recipe-import:completed`, правильные name/payload/finishedOn и пустой failedReason;
+  - backend штатно завершен после smoke-test без зависания;
+  - с разрешения разработчика выполнены read-only `git status`, `git diff` и `git diff --cached`;
+  - diff audit не обнаружил случайных README, Entity, migration, frontend или HTTP endpoint changes;
+  - staging не изменялся; существующее staged/unstaged состояние сохранено.
+- Step 23 Definition of Done завершен:
+  - все пункты checklist Этапа 5 подтверждены кодом и выполненными проверками;
+  - дополнительный runtime audit обнаружил старый Redis container с `appendonly no`;
+  - Redis container пересоздан по текущему Compose без воздействия на PostgreSQL;
+  - runtime config теперь показывает `appendonly yes` и `maxmemory-policy noeviction`;
+  - `docker inspect` подтвердил named volume `dishly_redis_data`, смонтированный read-write в `/data`;
+  - persistence проверена специальным ключом `dishly:verification:aof`, который сохранился после `docker compose restart redis`;
+  - verification key точечно удален командой `DEL`, результат `1`;
+  - `FLUSHALL`, `FLUSHDB` и массовое удаление Redis keys не выполнялись;
+  - после restart Redis снова находится в healthy state.
+- Step 24 final review завершен:
+  - итоговая архитектура соответствует Producer -> BullMQ -> Redis -> Processor;
+  - Redis host/port централизованно берутся из environment configuration;
+  - retries, lifecycle events, runtime validation и graceful shutdown настроены;
+  - unit tests, полный backend test suite, build, lint, migration check и manual smoke-test прошли;
+  - MUST FIX проблем перед Этапом 6 не осталось;
+  - к Этапу 6 автоматически не переходили.
+- Post-review improvements завершены:
+  - для queue jobs настроена retention policy: последние 1000 completed и 5000 failed jobs;
+  - smoke-test теперь самостоятельно ждет terminal state job до 10 секунд;
+  - smoke-test возвращает ошибку при failed state или timeout и всегда закрывает Nest context;
+  - failed worker log содержит номер выполненной попытки и общее число attempts;
+  - processor tests дополнены проверкой failed attempt logging;
+  - focused queue tests прошли: 2 suites, 13 tests;
+  - полный backend test suite прошел: 10 suites, 56 tests;
+  - `npm run build` и `npm run lint` прошли успешно;
+  - самодостаточный `npm run queue:smoke` без отдельно запущенного backend обработал job с recipe ID `42`, дождался completed и завершился с exit code `0`.
 
 Ключевые выводы Этапа 4:
 
