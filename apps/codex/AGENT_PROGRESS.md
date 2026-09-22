@@ -1,6 +1,6 @@
 # Рабочие заметки Codex по Dishly
 
-Последнее обновление: 2026-09-21.
+Последнее обновление: 2026-09-22.
 
 ## Этап 6 — Good Food Recipe Parser
 
@@ -12,13 +12,16 @@
 - Step 4: выполнен SSRF-аудит и усилены URL-тесты. После senior review DNS/IP-защита доработана: адрес разрешается один раз как IPv4, внутренние/специальные диапазоны отклоняются, а HTTPS-соединение открывается непосредственно к проверенному IP без повторного DNS lookup. Исходный hostname сохраняется для HTTP Host, TLS SNI и проверки сертификата. Любой небезопасный адрес в DNS-ответе отклоняет весь ответ. IPv6 для загрузки в MVP не используется; сетевые egress-правила остаются дополнительной защитой при production deployment.
 - Step 5: создан HTML fetcher с общим таймаутом 10 секунд, проверкой статуса и Content-Type, запретом перехода по redirects и лимитом 5 MiB по фактически полученным байтам. Для DNS/IP pinning вместо первоначального `fetch` используется встроенный `node:https` без новой зависимости. Запрашивается несжатый HTML; неожиданный Content-Encoding отклоняется. Fetcher не содержит recipe parsing logic.
 - Step 6: добавлены mocked unit-тесты fetcher и DNS/IP validation. Проверяются HTTPS options, status 403/404/500, redirect, Content-Type/Content-Encoding, таймаут при чтении тела, network failure, размер больше и ровно 5 MiB, ложный Content-Length, опасный/смешанный DNS-ответ и DNS timeout. Полный backend test suite: 13 suites, 112 tests passed; `npm run build` и read-only ESLint прошли.
-- Парсер не подключен к очереди, PostgreSQL или frontend. Следующий шаг — Step 7, JSON-LD extractor; без отдельной команды к нему не переходить.
+- Step 7: создан `extractJsonLd(html): unknown[]`. Cheerio находит все script-теги с MIME type `application/ld+json`; содержимое разбирается через `JSON.parse` в порядке документа. Пустые JSON-LD теги игнорируются, JavaScript не выполняется. Focused tests: 1 suite, 3 tests passed; TypeScript compilation и lint прошли. Поиск Recipe и восстановление после поврежденного JSON-LD остаются Step 8 и Step 9.
+- Step 8: создан `findRecipeInJsonLd(documents)`. Поиск охватывает прямой объект Recipe, массивы, `@graph`, `mainEntity`, `item` и массив значений `@type`. Отсутствие Recipe и несколько найденных Recipe дают явные ошибки; случайного выбора нет. Пользовательский рефакторинг extractor из Step 7 проверен: поведение, TypeScript и lint корректны. Focused tests Step 7–8: 2 suites, 10 tests passed; TypeScript compilation и lint прошли.
+- Step 9: `extractJsonLd` пропускает отдельные поврежденные script-теги и продолжает поиск. Если все непустые JSON-LD scripts повреждены, возникает отдельная ошибка; если JSON-LD отсутствует, finder сообщает об отсутствии данных; если валидные данные есть, но Recipe нет, остается ошибка `Recipe not found`. Добавлен сквозной тест `extractJsonLd → findRecipeInJsonLd` для malformed script перед valid Recipe. Focused tests Step 7–9: 2 suites, 14 tests passed; TypeScript compilation и lint прошли.
+- Парсер не подключен к очереди, PostgreSQL или frontend. Следующий шаг — Step 10, Schema Recipe parser; без отдельной команды к нему не переходить.
 
 ## Текущий контекст
 
 - Проект: Dishly.
-- Текущий этап: Этап 6 - Good Food Recipe Parser, следующий Step 7.
-- Текущая ветка: `feature/recipe-parser` (проверена 2026-09-21).
+- Текущий этап: Этап 6 - Good Food Recipe Parser, следующий Step 10.
+- Текущая ветка: `feature/recipe-parser` (проверена 2026-09-22).
 - Главный принцип этапа: получить `ParsedRecipe` из Good Food URL без очереди и PostgreSQL.
 - Исторические коммиты, отмеченные при завершении Этапа 5:
   - `69fdfee Merge pull request #1 from MissKamilla/feature/project-bootstrap`
@@ -26,7 +29,7 @@
   - `d7012f4 feat: scaffold React frontend`
   - `2d8995d chore: configure TypeORM and Redis infrastructure`
   - `a7ee82b chore: add PostgreSQL docker compose service`
-- Не переходить к Step 7 без явной команды разработчика.
+- Не переходить к Step 10 без явной команды разработчика.
 
 ## Итог Этапа 5
 
