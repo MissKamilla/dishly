@@ -1,8 +1,10 @@
+import { normalizePlainText } from './plain-text.normalizer';
+
 const ISO_RECIPE_DURATION =
   /^P(?:(\d+(?:[.,]\d+)?)D)?(?:T(?:(\d+(?:[.,]\d+)?)H)?(?:(\d+(?:[.,]\d+)?)M)?(?:(\d+(?:[.,]\d+)?)S)?)?$/;
 
 export function normalizeTitle(value: unknown): string {
-  const title = normalizeText(value);
+  const title = normalizePlainText(value);
   if (!title) {
     throw new Error('Recipe title is required');
   }
@@ -11,7 +13,7 @@ export function normalizeTitle(value: unknown): string {
 }
 
 export function normalizeDescription(value: unknown): string | null {
-  return normalizeText(value);
+  return normalizePlainText(value);
 }
 
 export function normalizeImageUrl(
@@ -106,14 +108,6 @@ export function normalizeServings(value: unknown): number | null {
 
 function toNumber(component: string | undefined): number {
   return component ? Number(component.replace(',', '.')) : 0;
-}
-
-function normalizeText(value: unknown): string | null {
-  if (typeof value !== 'string') {
-    return null;
-  }
-
-  return value.replace(/\s+/g, ' ').trim() || null;
 }
 
 function getImageUrl(value: unknown): unknown {

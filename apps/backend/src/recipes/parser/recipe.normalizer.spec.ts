@@ -13,6 +13,14 @@ describe('simple recipe fields', () => {
     expect(normalizeTitle('  Chicken   Pasta  ')).toBe('Chicken Pasta');
   });
 
+  it('extracts safe title text and decodes entities', () => {
+    expect(
+      normalizeTitle(
+        ' <strong>Fish &amp; Chips</strong><script>alert(1)</script> ',
+      ),
+    ).toBe('Fish & Chips');
+  });
+
   it.each([undefined, null, 42, '', ' \n\t '])(
     'rejects missing or empty title %s',
     (value) => {
@@ -24,6 +32,14 @@ describe('simple recipe fields', () => {
     expect(
       normalizeDescription('  Rich   sauce.\nReady in 30 minutes.  '),
     ).toBe('Rich sauce. Ready in 30 minutes.');
+  });
+
+  it('preserves separators between description blocks without executable markup', () => {
+    expect(
+      normalizeDescription(
+        '<p>Heat oil.</p><p>Stir &amp; serve.<br>Enjoy.</p><style>.x{}</style>',
+      ),
+    ).toBe('Heat oil. Stir & serve. Enjoy.');
   });
 
   it.each([undefined, null, 42, '  '])(
