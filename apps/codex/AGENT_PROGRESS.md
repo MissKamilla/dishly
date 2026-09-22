@@ -15,12 +15,20 @@
 - Step 7: создан `extractJsonLd(html): unknown[]`. Cheerio находит все script-теги с MIME type `application/ld+json`; содержимое разбирается через `JSON.parse` в порядке документа. Пустые JSON-LD теги игнорируются, JavaScript не выполняется. Focused tests: 1 suite, 3 tests passed; TypeScript compilation и lint прошли. Поиск Recipe и восстановление после поврежденного JSON-LD остаются Step 8 и Step 9.
 - Step 8: создан `findRecipeInJsonLd(documents)`. Поиск охватывает прямой объект Recipe, массивы, `@graph`, `mainEntity`, `item` и массив значений `@type`. Отсутствие Recipe и несколько найденных Recipe дают явные ошибки; случайного выбора нет. Пользовательский рефакторинг extractor из Step 7 проверен: поведение, TypeScript и lint корректны. Focused tests Step 7–8: 2 suites, 10 tests passed; TypeScript compilation и lint прошли.
 - Step 9: `extractJsonLd` пропускает отдельные поврежденные script-теги и продолжает поиск. Если все непустые JSON-LD scripts повреждены, возникает отдельная ошибка; если JSON-LD отсутствует, finder сообщает об отсутствии данных; если валидные данные есть, но Recipe нет, остается ошибка `Recipe not found`. Добавлен сквозной тест `extractJsonLd → findRecipeInJsonLd` для malformed script перед valid Recipe. Focused tests Step 7–9: 2 suites, 14 tests passed; TypeScript compilation и lint прошли.
-- Парсер не подключен к очереди, PostgreSQL или frontend. Следующий шаг — Step 10, Schema Recipe parser; без отдельной команды к нему не переходить.
+- Step 10: создан `mapSchemaRecipeFields` (переименован после review для точного отражения назначения) и промежуточный `SchemaRecipeFields`. Восемь полей Schema.org сопоставляются с именами будущего контракта Dishly; исходные значения остаются `unknown` до отдельных шагов нормализации. Nutrition, author и другие лишние поля не копируются; отсутствующие значения не выдумываются. Focused tests: 1 suite, 2 tests passed; TypeScript compilation и lint прошли.
+- Step 11: добавлены `normalizeTitle`, `normalizeDescription`, `normalizeImageUrl` в `recipe.normalizer.ts`. Title обязателен и очищается от лишних пробелов; description становится строкой или null; imageUrl выбирается из строки, массива или ImageObject.url, поддерживает относительный URL и принимает только HTTP(S) без credentials. Изображение не скачивается. Focused tests: 1 suite, 21 tests passed; TypeScript compilation и lint прошли.
+- Step 12: добавлен `normalizeDurationMinutes` для ISO 8601 длительностей с днями, часами, минутами и секундами. По последующему уточнению разработчика секунды учитываются, а итог округляется вверх через `Math.ceil()` до безопасного целого числа минут; проверки формата сохранены. `totalTimeMinutes` не добавлялся. Последняя проверка normalizer: 1 suite, 70 tests passed; TypeScript compilation и lint прошли.
+- Step 13: добавлен `normalizeServings` для положительного целого числа и однозначных строк `4`, `4 servings`, `Serves 4` (включая единственное число и различный регистр). Диапазоны, дробные, нулевые и неясные значения дают null без угадывания. Новых database fields нет. Focused tests normalizer: 1 suite, 67 tests passed; TypeScript compilation и lint прошли.
+- Step 14: добавлен отдельный `ingredient.normalizer.ts` с `normalizeIngredients`. Исходная строка каждого непустого ингредиента сохраняется без изменений в `rawText` и в исходном порядке. Простые записи с известной единицей (`30g`, `150ml`, `2 tbsp`) разбираются на name/quantity/unit; неоднозначные записи сохраняются с nullable structured fields без догадок. Focused tests: 1 suite, 5 tests passed; TypeScript compilation и lint прошли.
+- Step 15: нормализатор ингредиентов теперь поддерживает однозначные Unicode-дроби (`½`, `1½`, `1 ¼`) и slash-дроби (`1/2`, `1 1/2`) с известными единицами. Диапазоны `½ - 1 tsp`, `200-250g`, `a handful of parsley` и `salt to taste` сохраняют rawText; неясные структурированные поля остаются null. Не добавлены quantityMin/Max, unit conversion, dictionary или AI. Focused tests: 1 suite, 11 tests passed; TypeScript compilation и lint прошли.
+- Исправления после review Steps 10–15: regex ISO-длительности вынесен в именованную константу без изменения поведения; ингредиенты с пустой строкой или нестроковым значением теперь дают явную ошибку с позицией, а не незаметно исчезают; `name` не бывает пустой строкой. Простые штучные ингредиенты (`2 eggs`, `1 onion`) разбираются с `unit: null`; записи с незавершенной единицей измерения не трактуются как штучные. Числа за пределами безопасной точности не превращаются в неточное quantity. После исправлений полный backend test suite: 18 suites, 218 tests passed; build и lint прошли.
+- Дополнение Step 15: полные формы `teaspoon(s)`, `gram(s)`, `kilogram(s)` теперь распознаются и приводятся к уже используемым `tsp`, `g`, `kg`, в том числе после дробного количества. Записи вроде `2 grams` без названия продукта не разбираются как штучные ингредиенты. Проверка: 28 focused tests, backend build и lint прошли.
+- Парсер не подключен к очереди, PostgreSQL или frontend. Следующий шаг — Step 16, recipeInstructions; без отдельной команды к нему не переходить.
 
 ## Текущий контекст
 
 - Проект: Dishly.
-- Текущий этап: Этап 6 - Good Food Recipe Parser, следующий Step 10.
+- Текущий этап: Этап 6 - Good Food Recipe Parser, следующий Step 16.
 - Текущая ветка: `feature/recipe-parser` (проверена 2026-09-22).
 - Главный принцип этапа: получить `ParsedRecipe` из Good Food URL без очереди и PostgreSQL.
 - Исторические коммиты, отмеченные при завершении Этапа 5:
@@ -29,7 +37,7 @@
   - `d7012f4 feat: scaffold React frontend`
   - `2d8995d chore: configure TypeORM and Redis infrastructure`
   - `a7ee82b chore: add PostgreSQL docker compose service`
-- Не переходить к Step 10 без явной команды разработчика.
+- Не переходить к Step 16 без явной команды разработчика.
 
 ## Итог Этапа 5
 
