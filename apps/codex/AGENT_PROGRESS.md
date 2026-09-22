@@ -1,25 +1,36 @@
 # Рабочие заметки Codex по Dishly
 
-Последнее обновление: 2026-09-17.
+Последнее обновление: 2026-09-21.
+
+## Этап 6 — Good Food Recipe Parser
+
+- Текущая ветка по `git branch --show-current`: `feature/recipe-parser`.
+- После каждого следующего шага этого этапа обновлять этот файл.
+- Step 1: проведен аудит backend, Entity, очереди, DI, Node.js и библиотек. Локально используется Node.js 22.21.1; встроенный `fetch` доступен. `cheerio@1.2.0` уже присутствовал в package/lock и node_modules до работы над парсером. Отдельный ParserModule пока не нужен. Live-запрос Good Food не прошел из-за `EAI_AGAIN` (DNS окружения), поэтому доступность страницы не подтверждена.
+- Step 2: создан внутренний контракт `ParsedIngredient`, `ParsedRecipeStep`, `ParsedRecipe` без persistence-полей. TypeScript compilation прошла.
+- Step 3: создан `validateGoodFoodUrl` с точным allowlist двух hostname, HTTPS и запретом credentials и нестандартных портов. Добавлены unit-тесты. Путь `/recipes/...` пока не ограничен, так как live-формат источника не подтвержден.
+- Step 4: выполнен SSRF-аудит и усилены URL-тесты. После senior review DNS/IP-защита доработана: адрес разрешается один раз как IPv4, внутренние/специальные диапазоны отклоняются, а HTTPS-соединение открывается непосредственно к проверенному IP без повторного DNS lookup. Исходный hostname сохраняется для HTTP Host, TLS SNI и проверки сертификата. Любой небезопасный адрес в DNS-ответе отклоняет весь ответ. IPv6 для загрузки в MVP не используется; сетевые egress-правила остаются дополнительной защитой при production deployment.
+- Step 5: создан HTML fetcher с общим таймаутом 10 секунд, проверкой статуса и Content-Type, запретом перехода по redirects и лимитом 5 MiB по фактически полученным байтам. Для DNS/IP pinning вместо первоначального `fetch` используется встроенный `node:https` без новой зависимости. Запрашивается несжатый HTML; неожиданный Content-Encoding отклоняется. Fetcher не содержит recipe parsing logic.
+- Step 6: добавлены mocked unit-тесты fetcher и DNS/IP validation. Проверяются HTTPS options, status 403/404/500, redirect, Content-Type/Content-Encoding, таймаут при чтении тела, network failure, размер больше и ровно 5 MiB, ложный Content-Length, опасный/смешанный DNS-ответ и DNS timeout. Полный backend test suite: 13 suites, 112 tests passed; `npm run build` и read-only ESLint прошли.
+- Парсер не подключен к очереди, PostgreSQL или frontend. Следующий шаг — Step 7, JSON-LD extractor; без отдельной команды к нему не переходить.
 
 ## Текущий контекст
 
 - Проект: Dishly.
-- Текущий этап: Этап 5 - BullMQ + Redis Recipe Queue.
-- Текущая ветка: `feature/recipes-api`.
-- Последние коммиты:
+- Текущий этап: Этап 6 - Good Food Recipe Parser, следующий Step 7.
+- Текущая ветка: `feature/recipe-parser` (проверена 2026-09-21).
+- Главный принцип этапа: получить `ParsedRecipe` из Good Food URL без очереди и PostgreSQL.
+- Исторические коммиты, отмеченные при завершении Этапа 5:
   - `69fdfee Merge pull request #1 from MissKamilla/feature/project-bootstrap`
   - `f017d83 feat: complete project bootstrap`
   - `d7012f4 feat: scaffold React frontend`
   - `2d8995d chore: configure TypeORM and Redis infrastructure`
   - `a7ee82b chore: add PostgreSQL docker compose service`
-- Главный принцип этапа: добавить инфраструктуру очереди импорта рецептов через BullMQ и Redis без parser/import API/business status updates.
-- Следующий шаг по плану: Этап 6 - Good Food Parser, только после отдельной команды разработчика.
-- Не переходить к следующему шагу без явной команды разработчика.
+- Не переходить к Step 7 без явной команды разработчика.
 
-## На чем остановились
+## Итог Этапа 5
 
-Продолжать нужно с:
+Историческая точка завершения:
 
 ```text
 Этап 5 завершен - BullMQ + Redis Recipe Queue готова
