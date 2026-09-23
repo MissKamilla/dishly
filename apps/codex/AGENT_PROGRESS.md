@@ -1,6 +1,6 @@
 # Рабочие заметки Codex по Dishly
 
-Последнее обновление: 2026-09-22.
+Последнее обновление: 2026-09-23.
 
 ## Этап 6 — Good Food Recipe Parser
 
@@ -29,12 +29,18 @@
 - Повторный рефакторинг Step 17 по запросу разработчика: двухфункциональный вариант оказался недостаточно читаемым. Сейчас четыре функции: `normalizeSteps` (публичный вход), `normalizeInstruction` (обход и определение типа), `normalizeSection` (наследование группы), `createStep` (создание результата). Поведение сохранено; 19 suites, 231 tests passed, build и lint прошли.
 - Step 18: `normalizeSteps` принимает `sourceUrl`; у каждого `HowToStep` структурированные `duration` и `image` нормализуются через существующие `normalizeDurationMinutes` и `normalizeImageUrl`. Относительные изображения разрешаются относительно URL рецепта, некорректные значения дают null. Текстовые шаги без metadata остаются с null; извлечения времени из текста нет. Проверка: полный backend suite — 19 suites, 234 tests passed; build и lint прошли.
 - Step 19: общий `normalizePlainText` извлекает текст из HTML title, description и step text через уже установленный Cheerio, удаляет script/style/template и сохраняет пробелы на границах блоков и `<br>`. HTML-разметка не возвращается в ParsedRecipe; entity декодируются. Проверка: полный backend suite — 19 suites, 237 tests passed; build и lint прошли.
-- Парсер не подключен к очереди, PostgreSQL или frontend. Следующий шаг — Step 20, минимальная проверка результата; без отдельной команды к нему не переходить.
+- Step 20: добавлена чистая `validateParsedRecipe`, проверяющая непустой title и хотя бы один ingredient и step перед возвратом результата. Ошибки называют отсутствующее обязательное содержимое; nullable-поля остаются допустимыми. Вызов будет добавлен в единый parser entry point на Step 21. Проверка: полный backend suite — 20 suites, 243 tests passed; build и lint прошли.
+- Step 21: создан `RecipeParserService.parse(url)` как единый entry point. Он проверяет Good Food URL, загружает HTML, извлекает и находит Schema.org Recipe, нормализует поля и вызывает `validateParsedRecipe` перед возвратом. Сборка `ParsedRecipe` вынесена в одну pure function; остальные чистые модули не стали отдельными providers. Fetch в тестах замокан. Проверка: полный backend suite — 21 suites, 247 tests passed; build и lint прошли.
+- Step 22: `RecipeParserService` зарегистрирован provider в существующем `RecipesModule`, поэтому будущий `RecipeImportProcessor` сможет внедрить его внутри того же модуля. Отдельный ParserModule и внешний export не добавлены; parser не зависит от queue, processor, RecipesService или TypeORM. Отдельный metadata-test модуля удален как низкоценный: импорт всего модуля в Jest конфликтует с ESM `@nestjs/bullmq`; production build подтверждает корректность регистрации. Проверка: полный backend suite — 21 suites, 247 tests passed; build и lint прошли.
+- Step 23: добавлен единый `RecipeParserError` с четырьмя стабильными кодами: `unsupported_url`, `fetch_failed`, `recipe_not_found`, `invalid_recipe_data`. `RecipeParserService` оборачивает ошибки по этапам, сохраняя безопасное исходное сообщение и cause. HTTP 403/429 остаются явными fetch failures и не маскируются как отсутствие Recipe; HTML и секреты в сообщения не добавляются. Проверка: полный backend suite — 21 suites, 251 tests passed; build и lint прошли.
+- Рефакторинг после Step 23: `RecipeParserService.parse` упрощен до читаемого pipeline из `validateSourceUrl`, `fetchRecipeHtml`, `extractRecipe` и `normalizeAndValidateRecipe`. Универсальные технические wrappers `runStage/runAsyncStage` удалены; обработка соответствующей категории ошибки находится рядом с конкретной операцией. Поведение и коды ошибок сохранены. Проверка: 21 suites, 251 tests passed; build и lint прошли.
+- Step 24: у `RecipeParserError` добавлен явный boolean `retryable`. По умолчанию ошибка постоянная. Для fetch failures retryable=true получают timeout, сетевой/DNS-сбой, HTTP 429 и 5xx; HTTP 403 и остальные структурные/validation errors остаются permanent. Worker и настройки BullMQ не изменялись — признак только подготовлен для решения на Этапе 7. Проверка: полный backend suite — 21 suites, 253 tests passed; build и lint прошли.
+- Парсер пока не вызывается очередью и не сохраняет данные в PostgreSQL. Следующий шаг — Step 25, HTML fixtures; без отдельной команды к нему не переходить.
 
 ## Текущий контекст
 
 - Проект: Dishly.
-- Текущий этап: Этап 6 - Good Food Recipe Parser, следующий Step 20.
+- Текущий этап: Этап 6 - Good Food Recipe Parser, следующий Step 25.
 - Текущая ветка: `feature/recipe-parser` (проверена 2026-09-22).
 - Главный принцип этапа: получить `ParsedRecipe` из Good Food URL без очереди и PostgreSQL.
 - Исторические коммиты, отмеченные при завершении Этапа 5:
