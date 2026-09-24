@@ -41,6 +41,19 @@ describe('normalizeIngredients', () => {
     ]);
   });
 
+  it('keeps rawText but removes HTML from the structured name', () => {
+    const rawText = '2 tbsp <b>olive oil</b><script>alert("unsafe")</script>';
+
+    expect(normalizeIngredients([rawText])).toEqual([
+      {
+        rawText,
+        name: 'olive oil',
+        quantity: 2,
+        unit: 'tbsp',
+      },
+    ]);
+  });
+
   it.each([
     ['2 teaspoons sugar', 2, 'tsp', 'sugar'],
     ['1 teaspoon salt', 1, 'tsp', 'salt'],

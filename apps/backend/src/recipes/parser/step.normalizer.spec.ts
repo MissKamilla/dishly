@@ -133,6 +133,26 @@ describe('normalizeSteps', () => {
     ]);
   });
 
+  it('extracts safe text from a section name', () => {
+    expect(
+      normalizeSteps(
+        {
+          '@type': 'HowToSection',
+          name: '<b>For the sauce</b><script>alert("unsafe")</script>',
+          itemListElement: [{ '@type': 'HowToStep', text: 'Mix.' }],
+        },
+        sourceUrl,
+      ),
+    ).toEqual([
+      {
+        text: 'Mix.',
+        group: 'For the sauce',
+        durationMinutes: null,
+        imageUrl: null,
+      },
+    ]);
+  });
+
   it('normalizes structured duration and image on a HowToStep', () => {
     expect(
       normalizeSteps(

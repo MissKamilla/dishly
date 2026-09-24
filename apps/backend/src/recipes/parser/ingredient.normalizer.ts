@@ -1,4 +1,5 @@
 import { ParsedIngredient } from './types/parsed-recipe';
+import { normalizePlainText } from './plain-text.normalizer';
 
 const SIMPLE_MEASURED_INGREDIENT =
   /^(\d+(?:[.,]\d+)?)\s*(teaspoons?|kilograms?|grams?|mg|kg|g|ml|l|tbsp|tsp)\b\s+(.+)$/i;
@@ -62,7 +63,7 @@ function buildIngredient(
   unit: string | null,
 ): ParsedIngredient {
   const quantity = parseQuantity(quantityText);
-  const name = nameText.trim().replace(/\s+/g, ' ');
+  const name = normalizePlainText(nameText);
   if (
     quantity === null ||
     !Number.isFinite(quantity) ||

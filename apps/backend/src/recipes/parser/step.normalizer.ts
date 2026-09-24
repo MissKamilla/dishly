@@ -54,12 +54,10 @@ function normalizeSection(
   parentGroup: string | null,
   sourceUrl: string,
 ): ParsedRecipeStep[] {
-  const name = section.name;
-  const group =
-    typeof name === 'string' ? name.trim().replace(/\s+/g, ' ') : '';
+  const group = normalizePlainText(section.name);
   return normalizeInstruction(
     section.itemListElement,
-    group || parentGroup,
+    group ?? parentGroup,
     sourceUrl,
   );
 }

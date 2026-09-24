@@ -56,6 +56,37 @@ describe('RecipeParserService', () => {
     expect(mockedFetchHtml).toHaveBeenCalledWith(SOURCE_URL);
   });
 
+  it('returns null for every absent optional field', async () => {
+    mockedFetchHtml.mockResolvedValue(
+      htmlWithRecipe({
+        '@type': 'Recipe',
+        name: 'Minimal soup',
+        recipeIngredient: ['1 onion'],
+        recipeInstructions: ['Cook.'],
+      }),
+    );
+
+    await expect(parser.parse(SOURCE_URL)).resolves.toEqual({
+      title: 'Minimal soup',
+      description: null,
+      imageUrl: null,
+      servings: null,
+      prepTimeMinutes: null,
+      cookTimeMinutes: null,
+      ingredients: [
+        { rawText: '1 onion', name: 'onion', quantity: 1, unit: null },
+      ],
+      steps: [
+        {
+          text: 'Cook.',
+          group: null,
+          durationMinutes: null,
+          imageUrl: null,
+        },
+      ],
+    });
+  });
+
   it('rejects an unsupported URL before fetching', async () => {
     await expect(
       parser.parse('https://example.com/recipe'),
