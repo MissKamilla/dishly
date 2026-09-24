@@ -1,1144 +1,1462 @@
-# Dishly — Этап 5: BullMQ + Redis Recipe Queue
+# Dishly — Этап 6: Good Food Recipe Parser
 
-Мы продолжаем разработку fullstack-проекта **Dishly**.
+Мы продолжаем разработку fullstack-приложения **Dishly**.
 
-Текущий этап:
+Сейчас выполняем только **Этап 6 — разработка парсера рецептов Good Food**.
 
-**Этап 5 — реализация инфраструктуры очереди импорта рецептов с BullMQ и Redis.**
+Это отдельный этап. Мы должны получить рабочий механизм, который принимает URL рецепта, скачивает HTML, извлекает структурированные данные и возвращает объект `ParsedRecipe`.
 
-Наша цель — создать рабочую и проверенную очередь, которую на следующем этапе можно будет использовать для фонового парсинга рецептов.
-
-Работаем с существующим проектом. Не создавай новую архитектуру с нуля и не переписывай готовые модули.
+НЕ подключаем парсер к очереди и не сохраняем рецепты в PostgreSQL. Это задача этапа 7.
 
 ---
 
-# 1. Подготовка и аудит
+# 1. Обязательная подготовка
 
-Перед началом:
+Перед изменением кода:
 
 1. Прочитай корневой `AGENTS.md`.
 2. Прочитай `apps/codex/AGENT_PROGRESS.md`.
-3. Изучи текущий `apps/codex/CODEX_TASK.md`.
-4. Изучи backend, конфигурацию и Docker Compose.
-5. Выполни `git status`.
-6. Проверь версии существующих dependencies.
+3. Изучи текущий backend.
+4. Изучи Recipe Entity и существующие relations.
+5. Изучи очередь и текущий RecipeImportProcessor.
+6. Изучи package.json и TypeScript configuration.
+7. Выполни `git status`.
 
 Особенно изучи:
 
 ```text
 apps/backend/package.json
+
 apps/backend/src/app.module.ts
-apps/backend/src/main.ts
-apps/backend/src/config/validate-environment.ts
-apps/backend/src/recipes/recipes.module.ts
-apps/backend/src/recipes/recipes.service.ts
-apps/backend/src/recipes/entities/recipe.entity.ts
-apps/backend/src/recipes/enums/recipe-status.enum.ts
-apps/backend/.env.example
-docker-compose.yml
+
+apps/backend/src/recipes/
+├── recipes.module.ts
+├── recipes.service.ts
+├── entities/
+├── queue/
+└── types/
+
+apps/backend/src/config/
+
+apps/codex/AGENT_PROGRESS.md
 ```
 
-Не предполагай, что описание проекта полностью совпадает с кодом. Фактический код имеет приоритет.
+В `AGENT_PROGRESS.md` могут быть устаревшие сведения о текущей Git-ветке.
 
-**Сначала выполни аудит, покажи результаты и остановись.**
+Фактическое состояние Git проверяй отдельно.
+
+Сначала выполни аудит и покажи результат. Не изменяй файлы до согласования первого блока.
 
 ---
 
-# 2. Текущее состояние Dishly
+# 2. Текущее состояние проекта
 
-Уже завершены:
+Завершены:
 
-```text
-Этап 1 — Project Bootstrap
-Этап 2 — Database Schema and Entities
-Этап 3 — Backend Authentication
-Этап 4 — Recipes Backend API
-```
+- Этап 1 — Bootstrap.
+- Этап 2 — Database Schema.
+- Этап 3 — Backend Authentication.
+- Этап 4 — Recipes API.
+- Этап 5 — BullMQ + Redis.
 
-Работают следующие endpoints:
-
-```http
-GET    /recipes
-GET    /recipes/:id
-DELETE /recipes/:id
-```
-
-Backend использует:
-
-- NestJS;
-- TypeScript;
-- PostgreSQL;
-- TypeORM;
-- JWT + HttpOnly cookie;
-- глобальный JwtAuthGuard.
-
-Существуют Entity:
+Сейчас существуют:
 
 ```text
 User
 Recipe
 RecipeIngredient
 RecipeStep
-```
 
-Существуют статусы:
+RecipesService
+RecipesController
 
-```ts
-enum RecipeStatus {
-  PENDING = "pending",
-  PROCESSING = "processing",
-  COMPLETED = "completed",
-  FAILED = "failed",
-}
-```
-
-Redis уже добавлен в Docker Compose.
-
-Локальный host port:
-
-```text
-6380
-```
-
-Внутренний порт контейнера:
-
-```text
-6379
-```
-
-Backend запускается локально, не в Docker.
-
-Поэтому при локальной разработке подключение должно использовать:
-
-```text
-REDIS_HOST=localhost
-REDIS_PORT=6380
-```
-
-Не хардкодить эти значения.
-
----
-
-# 3. Главная цель этапа
-
-Создать инфраструктуру:
-
-```text
-NestJS
-   |
-   v
-BullMQ Queue
-   |
-   v
-Redis
-   |
-   v
+RecipeImportQueue
 RecipeImportProcessor
 ```
 
-Нужно добиться рабочего сценария:
+Очередь уже поддерживает:
 
-```text
-Добавляем тестовую задачу
-          |
-          v
-      queue.add()
-          |
-          v
-         Redis
-          |
-          v
-        Worker
-          |
-          v
-    Обработка задачи
-          |
-          v
-       Completed
+```ts
+{
+  recipeId: number;
+}
 ```
 
-На этом этапе worker выполняет только тестовую обработку.
+Но processor пока выполняет только проверку данных и логирование.
 
-Он ещё НЕ должен:
-
-- скачивать HTML;
-- парсить сайты;
-- сохранять ингредиенты;
-- изменять Recipe;
-- создавать новые Recipe.
-
-Это будет реализовано позднее.
+Не изменяй его на этом этапе.
 
 ---
 
-# 4. Архитектурный контракт очереди
+# 3. Главная цель
 
-Фиксируем имя очереди:
+Реализовать:
 
 ```ts
-export const RECIPE_IMPORT_QUEUE = "recipe-import";
+parse(url: string): Promise<ParsedRecipe>
 ```
 
-Имя задачи:
+Основной процесс:
 
-```ts
-export const IMPORT_RECIPE_JOB = "import-recipe";
-```
-
-Данные задачи:
-
-```ts
-export interface ImportRecipeJobData {
-  recipeId: number;
-}
+```text
+Good Food URL
+      ↓
+URL validation
+      ↓
+HTML fetcher
+      ↓
+JSON-LD extractor
+      ↓
+Schema.org Recipe
+      ↓
+Normalizer
+      ↓
+ParsedRecipe
 ```
 
 Пример:
 
 ```ts
-await queue.add(IMPORT_RECIPE_JOB, {
-  recipeId: 42,
-});
+const recipe = await parser.parse(
+  "https://www.bbcgoodfood.com/recipes/marry-me-chicken",
+);
 ```
 
-Именно такой формат должен использоваться в будущем API импорта.
+Результат должен соответствовать единому внутреннему контракту Dishly.
 
-Не передавать в job весь Recipe.
-
-Не передавать:
-
-```ts
-{
-  (userId, sourceUrl, title, ingredients, steps, status);
-}
-```
-
-**PostgreSQL остаётся основным источником данных.**
-
-В будущем worker получит `recipeId` и самостоятельно загрузит Recipe из БД.
+Парсер ничего не должен знать о конкретном пользователе, JWT, BullMQ или PostgreSQL.
 
 ---
 
-# 5. Границы текущего этапа
+# 4. Поддерживаемый источник
 
-Сейчас создаём только queue infrastructure.
-
-Не реализовывать:
-
-```http
-POST /recipes/import
-POST /recipes/:id/retry
-```
-
-Не менять существующие GET/DELETE endpoints.
-
-Не добавлять временный публичный API вроде:
-
-```http
-POST /queue/test
-```
-
-только для проверки очереди.
-
-Тестовый запуск будем выполнять через отдельный локальный smoke-test или другую безопасную dev-only процедуру.
-
-Никаких новых HTTP endpoints на этом этапе не требуется.
-
----
-
-# 6. Планируемая структура
-
-Предпочтительное направление:
+В MVP поддерживаем только:
 
 ```text
-apps/backend/src/
-│
-├── config/
-│   └── validate-environment.ts
-│
-├── recipes/
-│   ├── queue/
-│   │   ├── recipe-import.constants.ts
-│   │   ├── recipe-import.types.ts
-│   │   ├── recipe-import.queue.ts
-│   │   └── recipe-import.processor.ts
-│   │
-│   ├── recipes.module.ts
-│   └── ...
-│
-└── app.module.ts
+https://www.bbcgoodfood.com
+https://bbcgoodfood.com
 ```
 
-Имена файлов можно скорректировать, если в текущем проекте есть более подходящее соглашение.
+Основной тестовый рецепт:
 
-Не создавай отдельную папку или файл на каждую константу, если это только усложняет структуру.
+```text
+https://www.bbcgoodfood.com/recipes/marry-me-chicken
+```
 
-Не создавай generic queue framework, BaseQueue, QueueFactory и дополнительные abstraction layers.
+Дополнительные рецепты можно использовать для проверки разных структур данных, но не превращать этот этап в поддержку десятков источников.
 
-У нас пока одна очередь.
+Перед реализацией проверь реальную доступность страницы из локального backend-окружения.
 
----
+Не считай, что успешное открытие страницы в браузере автоматически означает, что Node.js получит тот же HTML.
 
-# 7. Порядок работы
+Если сайт возвращает CAPTCHA, 403 или ограничивает автоматические запросы, не пытайся обходить защиту.
 
-Работаем последовательно.
+В таком случае продолжай реализацию на сохранённых тестовых fixtures и явно сообщи, что live integration не проверена.
 
-Перед каждым крупным блоком:
-
-1. Коротко объясни, что делаем.
-2. Объясни зачем.
-3. Назови файлы, которые будут изменены.
-4. Покажи необходимые команды.
-5. Выполни изменения после моего подтверждения.
-
-Если требуется установить библиотеку:
-
-- сначала покажи команду;
-- объясни назначение dependency;
-- дождись, пока я выполню установку.
-
-Не устанавливай пакеты молча.
-
-После каждого логического блока:
-
-- проверяй компиляцию;
-- запускай подходящие тесты;
-- обновляй `apps/codex/AGENT_PROGRESS.md`.
-
-Не создавай commit без моего отдельного разрешения.
+Не подменяй ожидаемую страницу другим сайтом без согласования.
 
 ---
 
-# Step 1 — аудит Redis и backend
+# 5. Архитектура
+
+Предпочтительная структура:
+
+```text
+src/recipes/
+│
+├── parser/
+│   ├── types/
+│   │   └── parsed-recipe.ts
+│   │
+│   ├── url-validator.ts
+│   ├── html-fetcher.ts
+│   ├── json-ld.extractor.ts
+│   ├── schema-recipe.parser.ts
+│   ├── recipe.normalizer.ts
+│   └── recipe-parser.service.ts
+│
+├── queue/
+├── entities/
+├── recipes.module.ts
+└── ...
+```
+
+Это ориентир, не обязательное количество файлов.
+
+Не создавай отдельный класс для каждого простого преобразования.
+
+Если функцию удобно разместить в существующем файле без нарушения ответственности — так и сделай.
+
+Не добавляй:
+
+```text
+BaseParser
+AbstractParserFactory
+ParserRegistry
+ParserPluginManager
+```
+
+Сейчас у нас один источник.
+
+При появлении второго источника архитектуру можно расширить.
+
+---
+
+# 6. Порядок работы
+
+Работай логическими блоками.
+
+Перед каждым блоком показывай:
+
+**Что делаем:** кратко.
+
+**Почему:** техническая причина.
+
+**Какие файлы изменятся:** конкретные пути.
+
+**Что проверяем:** конкретная команда или тест.
+
+После согласования реализуй законченный логический блок и проверь результат.
+
+Если требуется новая библиотека:
+
+1. Проверь, нет ли её уже в package.json.
+2. Объясни, какую проблему она решает.
+3. Покажи команду установки.
+4. Дождись моего подтверждения установки.
+
+Не устанавливай зависимости молча.
+
+Не создавай Git commit без моего разрешения.
+
+После каждого крупного блока обновляй `apps/codex/AGENT_PROGRESS.md`.
+
+---
+
+# Step 1 — аудит и выбор библиотек
 
 Сначала ничего не меняй.
 
-Проверь:
+Определи:
 
-- как Redis описан в Docker Compose;
-- используется ли persistent volume;
-- включено ли сохранение данных Redis;
-- как настроена environment validation;
-- подключён ли BullMQ ранее;
-- какие зависимости потребуются;
-- куда логичнее зарегистрировать очередь;
-- как работает lifecycle NestJS при завершении приложения.
+- Какая версия Node.js требуется проекту?
+- Доступен ли встроенный `fetch`?
+- Чем сейчас обрабатываются HTTP-запросы?
+- Есть ли Cheerio?
+- Как устроен NestJS dependency injection?
+- Нужно ли создавать отдельный ParserModule?
 
-Отдельно проверь, не содержит ли существующий проект похожую инфраструктуру, которую можно переиспользовать.
-
-После аудита покажи короткий план файлов и остановись.
-
----
-
-# Step 2 — установить BullMQ
-
-Нам нужны:
+Предварительное предпочтение:
 
 ```text
-@nestjs/bullmq
-bullmq
+HTML fetching → Node.js fetch
+
+HTML parsing → Cheerio
+
+JSON-LD parsing → JSON.parse
+
+Validation → небольшие TypeScript type guards
 ```
 
-Ожидаемая команда из:
+Не устанавливай Axios, Puppeteer, Playwright, jsdom или AI SDK без доказанной необходимости.
 
-```text
-apps/backend
-```
+Cheerio можно установить, если без него придётся писать собственный HTML parser.
+
+Ожидаемая команда:
 
 ```bash
-npm install @nestjs/bullmq bullmq
+npm install cheerio
 ```
 
-Но сначала проверь актуальную совместимость пакетов с установленным NestJS и между собой.
+Выполнять из `apps/backend` после проверки совместимости.
 
-Используй официальную документацию.
-
-Не устанавливай:
-
-```text
-@nestjs/bull
-bull
-```
-
-Это другая интеграция.
-
-Не устанавливай одновременно Bull и BullMQ.
-
-Не добавляй вручную дополнительные Redis dependencies, если BullMQ уже обеспечивает всё необходимое для нашей конфигурации.
-
-Если дополнительный пакет действительно требуется, объясни причину.
+Заверши аудит предложением конкретной структуры файлов и остановись.
 
 ---
 
-# Step 3 — Redis environment variables
-
-Сейчас в backend `.env.example` нет Redis connection variables.
-
-Добавь:
-
-```env
-REDIS_HOST=localhost
-REDIS_PORT=6380
-```
-
-Используй тот же подход к конфигурации, который уже применяется для PostgreSQL.
-
-Не дублируй Redis host/port строками в разных файлах.
-
-Обнови:
-
-```text
-apps/backend/.env.example
-```
-
-Также нужно обновить локальный:
-
-```text
-apps/backend/.env
-```
-
-Не записывай реальные secrets в Git.
-
----
-
-## Environment validation
-
-В:
-
-```text
-src/config/validate-environment.ts
-```
-
-добавь проверку:
-
-```text
-REDIS_HOST
-REDIS_PORT
-```
-
-`REDIS_HOST` — непустая строка.
-
-`REDIS_PORT` — корректный TCP port:
-
-```text
-1–65535
-```
-
-Не принимай:
-
-```text
-abc
-0
-70000
-6380abc
-```
-
-Проверь, можно ли переиспользовать существующую логику проверки порта без создания ненужных абстракций.
-
-При неправильной конфигурации приложение должно выдавать понятную ошибку на этапе запуска.
-
----
-
-# Step 4 — проверить сохранение данных Redis
-
-Сейчас Redis описан в Docker Compose без persistent volume.
-
-Для очереди это важный момент.
-
-Если контейнер пересоздаётся, мы не должны без необходимости терять ожидающие задачи.
-
-Изучи возможность включить Redis AOF persistence и добавить named volume.
-
-Предпочтительный подход:
-
-```text
-Redis
-  |
-  v
-AOF persistence
-  |
-  v
-Docker named volume
-```
-
-Внеси минимальные необходимые изменения в `docker-compose.yml`.
-
-Не меняй PostgreSQL configuration.
-
-Не выполняй:
-
-```bash
-docker compose down -v
-```
-
-Это может удалить существующие данные PostgreSQL.
-
-Не обещай абсолютную сохранность каждой задачи при любом сбое: Redis persistence имеет собственные гарантии и ограничения.
-
-Для текущего этапа достаточно корректной локальной конфигурации и понятного поведения при обычном перезапуске контейнера.
-
-Проверь также Redis `maxmemory-policy`; для очереди ожидается политика без автоматического вытеснения ключей.
-
----
-
-# Step 5 — зарегистрировать BullMQ в NestJS
-
-Изучи официальную интеграцию NestJS с BullMQ.
-
-Используй:
-
-```ts
-BullModule;
-```
-
-и подходящую асинхронную конфигурацию через:
-
-```ts
-ConfigService;
-```
-
-Предпочтительно:
-
-```ts
-BullModule.forRootAsync(...)
-```
-
-Подключение должно использовать:
-
-```text
-REDIS_HOST
-REDIS_PORT
-```
-
-Не хардкодить:
-
-```ts
-host: 'localhost',
-port: 6379
-```
-
-Важно:
-
-```text
-localhost:6380
-```
-
-актуально только для нашего локального запуска.
-
-Если backend позже будет запущен внутри Docker Compose, адрес потребуется настроить через env для контейнерной сети.
-
-Не добавлять сейчас Dockerfile для backend.
-
----
-
-# Step 6 — зарегистрировать очередь
-
-Создай queue:
-
-```text
-recipe-import
-```
-
-Используй:
-
-```ts
-BullModule.registerQueue(...)
-```
-
-Размести регистрацию в подходящем NestJS module.
-
-Предпочтительно использовать существующий:
-
-```text
-RecipesModule
-```
-
-поскольку очередь относится к домену рецептов.
-
-Но Redis connection configuration должна быть централизована.
-
-Не дублируй настройки подключения внутри каждой очереди.
-
-Не создавай отдельный большой `QueueModule` без необходимости.
-
----
-
-# Step 7 — типизация job
-
-Создай единый контракт:
-
-```ts
-interface ImportRecipeJobData {
-  recipeId: number;
-}
-```
-
-Используй его и при добавлении задачи, и в processor.
-
-Нельзя иметь разные версии payload в producer и worker.
-
-Не использовать:
-
-```ts
-Job<any>;
-```
-
-если можно явно типизировать данные.
-
-Важно: TypeScript-типы не заменяют runtime validation.
-
-Processor должен корректно реагировать на явно некорректные данные задачи, например отсутствие положительного целочисленного `recipeId`.
-
-Не создавай для этого полноценную DTO/HTTP validation инфраструктуру.
-
----
-
-# Step 8 — создать producer
-
-Нужно реализовать минимальный механизм добавления задачи в очередь.
-
-Например сервис:
-
-```text
-RecipeImportQueue
-```
-
-или другое понятное название.
-
-Его задача:
-
-```text
-recipeId
-   |
-   v
-queue.add()
-```
-
-Внутри должен использоваться:
-
-```ts
-@InjectQueue(RECIPE_IMPORT_QUEUE)
-```
-
-и типизированный:
-
-```ts
-Queue;
-```
-
-Предполагаемый метод:
-
-```ts
-enqueue(recipeId: number)
-```
-
-Он должен возвращать результат или необходимую информацию об успешном добавлении задачи.
-
-Не привязывай producer к Express request/response.
-
-Не помещай в него бизнес-логику создания Recipe.
-
-В будущем `RecipesService` сможет использовать этот producer после создания Recipe в PostgreSQL.
-
-Но сейчас не подключай новый import flow к существующему `RecipesService`.
-
----
-
-# Step 9 — создать processor
+# Step 2 — контракт ParsedRecipe
 
 Создай:
 
 ```text
-RecipeImportProcessor
+src/recipes/parser/types/parsed-recipe.ts
 ```
 
-Используй:
+Нужны три интерфейса.
 
 ```ts
-@Processor(...)
-```
+export interface ParsedIngredient {
+  rawText: string;
+  name: string | null;
+  quantity: number | null;
+  unit: string | null;
+}
 
-и:
+export interface ParsedRecipeStep {
+  text: string;
+  group: string | null;
+  durationMinutes: number | null;
+  imageUrl: string | null;
+}
 
-```ts
-WorkerHost;
-```
+export interface ParsedRecipe {
+  title: string;
+  description: string | null;
 
-Processor должен обрабатывать задачу:
+  imageUrl: string | null;
 
-```text
-import-recipe
-```
+  servings: number | null;
 
-Сейчас он выполняет только:
+  prepTimeMinutes: number | null;
+  cookTimeMinutes: number | null;
 
-```text
-получить job
-↓
-проверить имя/payload
-↓
-залогировать начало обработки
-↓
-завершить задачу
-```
-
-Пример полезного логирования:
-
-```text
-Processing recipe import job 123 for recipe 42
-```
-
-Используй стандартный:
-
-```ts
-Logger;
-```
-
-из NestJS.
-
-Не используй `console.log()` в качестве постоянной инфраструктуры логирования.
-
-Не логируй JWT, cookie или secrets.
-
----
-
-## Очень важно
-
-Processor пока НЕ должен:
-
-```text
-SELECT Recipe
-UPDATE Recipe
-fetch HTML
-parse HTML
-save ingredients
-save steps
-```
-
-И не должен переводить Recipe в:
-
-```text
-PROCESSING
-COMPLETED
-FAILED
-```
-
-На данном этапе мы тестируем только инфраструктуру очереди.
-
-Эти бизнес-статусы будут реализованы на этапе 7.
-
----
-
-# Step 10 — обработка неизвестных jobs
-
-Processor должен явно обрабатывать ситуацию, когда получил job с неожиданным именем.
-
-Не нужно молча считать неизвестную задачу успешно выполненной.
-
-Предпочтительно выбросить ошибку.
-
-Не добавлять сложную систему регистрации десятков job handlers.
-
-У нас сейчас один тип задачи.
-
----
-
-# Step 11 — Job lifecycle
-
-Нужно разобраться со следующими состояниями BullMQ:
-
-```text
-waiting
-active
-completed
-failed
-delayed
-```
-
-Не путать их с RecipeStatus.
-
-BullMQ:
-
-```text
-job state
-```
-
-PostgreSQL:
-
-```text
-recipe business status
-```
-
-Это разные вещи.
-
-Frontend в будущем должен получать статус рецепта через PostgreSQL/API, а не через прямой доступ к Redis.
-
----
-
-# Step 12 — Completed / Failed events
-
-Добавь минимальное логирование результатов обработки.
-
-Нужно видеть:
-
-```text
-Job completed
-```
-
-или:
-
-```text
-Job failed
-```
-
-Используй подходящие возможности BullMQ/NestJS.
-
-При ошибке processor должен выбрасывать исключение.
-
-Не делай:
-
-```ts
-catch (error) {
-  logger.error(error);
-  return;
+  ingredients: ParsedIngredient[];
+  steps: ParsedRecipeStep[];
 }
 ```
 
-Иначе BullMQ может посчитать задачу успешно выполненной.
+Это внутренний результат парсера.
 
-Если ошибка перехватывается для логирования, она должна корректно передаваться дальше.
+НЕ добавлять:
 
-Не создавать собственную большую error-handling infrastructure.
+```text
+id
+recipeId
+userId
+status
+sourceUrl
+errorMessage
+createdAt
+updatedAt
+position
+```
+
+`position` назначит persistence layer на этапе 7.
+
+Не менять существующие Entity ради ParsedRecipe.
+
+После создания проверь TypeScript compilation.
 
 ---
 
-# Step 13 — Retry configuration
+# Step 3 — URL validation
 
-В Dishly обязательно предусмотрена возможность повторных попыток.
+Реализуй отдельную функцию или небольшой сервис для проверки URL.
 
-Начальная конфигурация:
+Разрешены только два точных hostname:
+
+```text
+bbcgoodfood.com
+www.bbcgoodfood.com
+```
+
+Проверка должна выполняться через стандартный `URL`.
+
+Нельзя использовать:
 
 ```ts
+url.includes("bbcgoodfood.com");
+```
+
+Это небезопасно.
+
+Разрешать только HTTPS.
+
+Запретить:
+
+- HTTP;
+- file://;
+- ftp://;
+- localhost;
+- IP addresses;
+- произвольные порты;
+- username/password внутри URL;
+- похожие домены;
+- поддомены, которых нет в allowlist.
+
+Пример:
+
+```text
+https://www.bbcgoodfood.com/recipes/example
+→ accepted
+```
+
+```text
+https://bbcgoodfood.com.evil.example/recipes/example
+→ rejected
+```
+
+```text
+http://localhost:3000
+→ rejected
+```
+
+```text
+https://example.com
+→ rejected
+```
+
+Для MVP можно ограничить допустимые страницы путём `/recipes/...`, если это подтверждается форматом выбранного источника.
+
+Не добавляй generic URL validation framework.
+
+---
+
+# Step 4 — SSRF protection
+
+Мы скачиваем страницу по внешнему URL.
+
+Это потенциальная SSRF-уязвимость.
+
+Проверки только исходного URL недостаточно, если HTTP-клиент следует redirects.
+
+Нужно:
+
+1. Использовать точный hostname allowlist.
+2. Запретить произвольные протоколы.
+3. Запретить произвольные порты.
+4. Отключить автоматическое следование redirects.
+5. Не переходить на неизвестные адреса.
+
+Для MVP предпочтительно отклонять redirects.
+
+Если Good Food использует необходимый легитимный redirect, сначала изучи его и объясни, как безопасно разрешить конкретный переход.
+
+Не добавляй автоматическое перенаправление на любой URL из заголовка Location.
+
+Отдельно оцени риски DNS/IP resolution и DNS rebinding для используемого HTTP-клиента. Если безопасный контроль невозможно гарантировать обычным fetch, предложи минимальное технически корректное решение и не объявляй SSRF полностью закрытым одной проверкой hostname.
+
+Не создавай огромную security infrastructure для произвольного веб-скрейпера: наш MVP ограничен одним источником.
+
+Добавь тесты для URL validation.
+
+---
+
+# Step 5 — HTML fetcher
+
+Реализуй:
+
+```ts
+fetchHtml(url: string): Promise<string>
+```
+
+Его задача только:
+
+```text
+URL → HTML
+```
+
+Fetcher не должен знать, что такое Recipe, Ingredient или Step.
+
+Обязательно предусмотри:
+
+- timeout;
+- HTTP status validation;
+- проверку Content-Type;
+- ограничение максимального размера ответа;
+- корректное завершение загрузки;
+- понятную обработку network errors.
+
+Ориентиры для MVP:
+
+```text
+timeout: 10 секунд
+
+max HTML size: 5 MB
+```
+
+Если реальные потребности сайта требуют другого значения, объясни изменение.
+
+Не ограничивай размер только по Content-Length: этот заголовок может отсутствовать или быть недостоверным.
+
+Контролируй фактически получаемый объём данных.
+
+При превышении лимита прекращай чтение ответа.
+
+Не логируй полный HTML.
+
+Не добавляй browser automation.
+
+---
+
+# Step 6 — тесты HTML fetcher
+
+HTTP-запросы в обычных unit tests должны мокаться.
+
+Проверь:
+
+- успешный HTML response;
+- 404;
+- 403;
+- 500;
+- timeout;
+- redirect;
+- неправильный Content-Type;
+- response больше лимита;
+- network failure.
+
+Тесты не должны делать реальные запросы к Good Food.
+
+Не проверяй fetcher через случайные публичные URL.
+
+---
+
+# Step 7 — JSON-LD extractor
+
+Следующая задача:
+
+```text
+HTML → JSON-LD objects
+```
+
+На HTML-странице ищем:
+
+```html
+<script type="application/ld+json">
+```
+
+Используй Cheerio для поиска элементов.
+
+Не пытайся извлекать JSON-LD регулярным выражением из полного HTML.
+
+Не выполнять JavaScript со страницы.
+
+Не использовать:
+
+```ts
+eval();
+```
+
+или выполнение кода из script tags.
+
+Нужно получить JSON-содержимое подходящих script elements и обработать через JSON.parse.
+
+Учитывай, что на странице может находиться несколько JSON-LD script tags.
+
+Не предполагай, что Recipe обязательно находится в первом script.
+
+---
+
+# Step 8 — поиск Recipe в JSON-LD
+
+Структура может выглядеть так:
+
+```json
 {
-  attempts: 3,
-  backoff: {
-    type: 'exponential',
-    delay: 1000,
-  },
+  "@type": "Recipe",
+  "name": "Chicken Pasta"
 }
 ```
 
-Это означает максимум три попытки выполнения задачи.
+Или так:
 
-Настройки можно разместить в:
-
-```text
-defaultJobOptions
+```json
+[
+  {
+    "@type": "BreadcrumbList"
+  },
+  {
+    "@type": "Recipe"
+  }
+]
 ```
 
-или непосредственно при добавлении job.
+Или так:
 
-Выбери один понятный вариант.
-
-Не дублируй настройки в нескольких местах.
-
-Сейчас нужно:
-
-- корректно настроить retries;
-- понять поведение BullMQ;
-- покрыть настройки/ошибки необходимыми тестами.
-
-Не реализовывать изменение `Recipe.status` при retries.
-
-Это будет на этапе 7.
-
-Не добавлять искусственную ветку в production processor вроде `if (recipeId === 999) throw`, только чтобы проверить ошибку.
-
-Проверяй failure behavior через тесты.
-
----
-
-# Step 14 — поведение при недоступном Redis
-
-Предусмотри, что Redis может быть временно недоступен.
-
-Важно различать:
-
-```text
-API producer
+```json
+{
+  "@graph": [
+    {
+      "@type": "WebPage"
+    },
+    {
+      "@type": "Recipe"
+    }
+  ]
+}
 ```
 
-и:
+Также:
 
-```text
-background worker
+```json
+{
+  "@type": ["Recipe", "CreativeWork"]
+}
 ```
 
-В будущем API не должен бесконечно ждать ответа Redis.
+Extractor должен находить Recipe в таких структурах.
 
-Проверь соответствующие connection/retry options установленной версии BullMQ.
-
-Если необходимо, выбери разумную fail-fast конфигурацию для producer.
-
-Не отключай бесконечное восстановление соединения worker без понимания последствий.
-
-Не создавай самостоятельно сложную retry system поверх BullMQ.
-
----
-
-# Step 15 — graceful shutdown
-
-Проверь lifecycle BullMQ при завершении NestJS.
-
-При остановке приложения должны корректно закрываться используемые подключения и worker.
-
-Используй встроенные возможности NestJS/BullMQ, если они уже обеспечивают это.
-
-Не создавай собственный connection manager без необходимости.
-
-Если потребуется:
+Не считай достаточной проверку:
 
 ```ts
-app.enableShutdownHooks();
+data["@type"] === "Recipe";
 ```
 
-объясни почему.
+При этом не делай универсальный JSON graph engine.
 
-Проверь, что процесс не зависает из-за оставшихся Redis connections.
+Поддержи реальные и разумные варианты Schema.org.
 
-Не добавляй принудительное закрытие соединений, если это может оборвать выполняющиеся задачи без необходимости.
+Если на странице несколько Recipe, не выбирай произвольный без анализа.
+
+Для MVP можно использовать явно определённое правило выбора главного Recipe. Если выбрать однозначно невозможно — возвращай понятную ошибку.
 
 ---
 
-# Step 16 — подготовить безопасный smoke-test
+# Step 9 — обработка повреждённого JSON-LD
 
-Сейчас публичного endpoint для добавления Recipe ещё нет.
-
-Поэтому нужно проверить очередь отдельно.
-
-Предпочтительно создать минимальный dev-only способ отправить одну job через Nest dependency injection.
+Один некорректный script не должен автоматически ломать поиск в остальных script tags.
 
 Например:
 
 ```text
-apps/backend/scripts/queue-smoke.ts
+Script 1 → malformed JSON
+
+Script 2 → valid Recipe
 ```
 
-Точное расположение выбери с учётом текущей структуры проекта.
+Нужно найти Recipe во втором script.
 
-Не создавай огромный CLI framework.
+Если ни один script не содержит подходящий Recipe, вернуть контролируемую ошибку.
 
-Не создавай HTTP endpoint для тестирования.
+Не возвращать:
 
-Тестовый механизм должен использовать настоящую зарегистрированную очередь или producer.
+```ts
+{} as ParsedRecipe
+```
 
-Не создавать независимый `new Queue(...)` с отдельными захардкоженными Redis settings.
+Не выдумывать Recipe из случайных данных страницы.
 
-После завершения smoke-test приложение должно корректно освобождать ресурсы.
-
-Если отдельный файл для этого не нужен и есть более простой безопасный способ — объясни и используй его.
+Не подавлять ошибки полностью: различай отсутствие структурированных данных и некорректную структуру там, где это практически полезно.
 
 ---
 
-# Step 17 — manual verification
+# Step 10 — Schema Recipe parser
 
-Нужно выполнить реальную проверку.
+Получаем найденный Schema.org Recipe object.
 
-Сначала:
+Нужно извлечь:
 
-```bash
-docker compose ps
-```
+| Schema.org         | Dishly          |
+| ------------------ | --------------- |
+| name               | title           |
+| description        | description     |
+| image              | imageUrl        |
+| recipeYield        | servings        |
+| prepTime           | prepTimeMinutes |
+| cookTime           | cookTimeMinutes |
+| recipeIngredient   | ingredients     |
+| recipeInstructions | steps           |
 
-Проверить, что Redis работает.
-
-Затем запустить backend:
-
-```bash
-npm run start:dev
-```
-
-Добавить тестовую job:
-
-```ts
-{
-  recipeId: 42;
-}
-```
-
-Ожидаемое поведение:
+Не добавлять сейчас:
 
 ```text
-Producer
-   |
-   v
-Redis
-   |
-   v
-Worker receives job
-   |
-   v
-Completed
+nutrition
+ratings
+author
+video
+categories
+tags
+keywords
 ```
 
-Проверить:
+Не сохранять весь исходный Schema.org object в БД.
 
-- задача добавляется;
-- worker её получает;
-- логируется ожидаемый `recipeId`;
-- задача завершается успешно;
-- Redis содержит ожидаемое состояние job либо это подтверждается через BullMQ API;
-- отсутствие parser не мешает работе очереди.
+---
 
-После проверки убрать временные тестовые данные, если это необходимо и безопасно.
+# Step 11 — нормализация простых полей
 
-Не удалять другие Redis keys вслепую.
+## title
+
+Обязательная непустая строка.
+
+Если title отсутствует, Recipe не должен считаться успешно распарсенным.
+
+## description
+
+Строка либо null.
+
+Нормализовать лишние пробелы.
+
+Не уничтожать смысловое содержимое.
+
+## imageUrl
+
+Поддержать типичные варианты:
+
+```text
+string
+array of strings
+ImageObject.url
+```
+
+Вернуть один валидный URL либо null.
+
+Если URL относительный, можно разрешить его относительно URL исходной страницы.
+
+Не загружать изображение.
+
+Не сохранять его на диск.
+
+Не создавать image storage.
+
+---
+
+# Step 12 — время приготовления
+
+Schema.org может возвращать:
+
+```text
+PT20M
+PT45M
+PT1H30M
+```
+
+Нужно получить:
+
+```ts
+20;
+45;
+90;
+```
+
+Поддержать корректные ISO 8601 duration values, необходимые для рецептов, включая часы и минуты.
+
+Не писать огромную собственную ISO 8601 library.
+
+Если значение невозможно корректно преобразовать, вернуть null.
 
 Не использовать:
 
-```bash
-FLUSHALL
-FLUSHDB
+```ts
+parseInt("PT45M");
 ```
 
-для очистки тестов.
+Не угадывать значения.
+
+`totalTimeMinutes` в текущем ParsedRecipe не существует.
+
+Не добавлять его самостоятельно.
 
 ---
 
-# Step 18 — тесты
+# Step 13 — servings
 
-Добавить focused tests.
-
-## Producer tests
-
-Проверить:
+Примеры:
 
 ```text
-enqueue(42)
+"4"
+4
+"4 servings"
+"Serves 4"
 ```
 
-вызывает:
+Результат:
 
 ```ts
-queue.add(...)
+servings: 4;
 ```
 
-с правильными:
+Если:
 
 ```text
-job name
-payload
-options
+"4-6 servings"
 ```
 
-Не подключать настоящий Redis в обычных unit tests.
+не выбирай случайное число.
 
-Использовать подходящий mock.
+Для MVP допускается:
 
-## Processor tests
+```ts
+servings: null;
+```
 
-Проверить:
+Если значение означает количество порций неочевидным образом, также возвращай null.
 
-- корректная job обрабатывается;
-- правильный `recipeId` читается из payload;
-- неизвестная job не завершается успешно;
-- некорректный payload обрабатывается ошибкой;
-- ошибка обработки не проглатывается.
-
-Не писать тесты на конкретный текст логов без необходимости.
-
-## Retry tests
-
-Проверить конфигурацию attempts/backoff и важное поведение при ошибке.
-
-Не создавать огромную integration-test инфраструктуру только для одной очереди.
+Не добавлять новые database fields.
 
 ---
 
-# Step 19 — не изменять Recipe Entity
+# Step 14 — ингредиенты
 
-На этом этапе никаких изменений в БД не требуется.
+Источник может содержать:
+
+```json
+{
+  "recipeIngredient": [
+    "30g plain flour",
+    "4 chicken breasts",
+    "½ - 1 tsp chilli flakes",
+    "salt to taste"
+  ]
+}
+```
+
+Любой ингредиент должен сохранять исходную строку:
+
+```ts
+rawText: string;
+```
+
+Для простых случаев можно извлекать:
+
+```text
+150ml double cream
+```
+
+в:
+
+```ts
+{
+  rawText: '150ml double cream',
+  name: 'double cream',
+  quantity: 150,
+  unit: 'ml'
+}
+```
+
+И:
+
+```text
+2 tbsp olive oil
+```
+
+в:
+
+```ts
+{
+  rawText: '2 tbsp olive oil',
+  name: 'olive oil',
+  quantity: 2,
+  unit: 'tbsp'
+}
+```
+
+Если не уверен — возвращай null в структурированных полях.
+
+Не придумывай количество или единицы.
+
+---
+
+# Step 15 — сложные ингредиенты
+
+Обязательно сохрани rawText для:
+
+```text
+½ - 1 tsp chilli flakes
+200-250g chicken
+a handful of parsley
+salt to taste
+```
+
+Не реализовывать сейчас:
+
+```text
+quantityMin
+quantityMax
+unit conversion
+normalized ingredient dictionary
+shopping list merging
+```
+
+Не использовать AI.
+
+Цель MVP — не потерять исходную информацию.
+
+При этом обрабатывай простые распространённые дроби, если решение не усложняет parser чрезмерно.
+
+Не считай неизвестную структуру ошибкой всего рецепта, если rawText сохранён.
+
+---
+
+# Step 16 — recipeInstructions
+
+Поддержать:
+
+```text
+HowToStep
+HowToSection
+Text
+```
+
+Основной формат:
+
+```json
+{
+  "@type": "HowToStep",
+  "text": "Heat the oil."
+}
+```
+
+Результат:
+
+```ts
+{
+  text: 'Heat the oil.',
+  group: null,
+  durationMinutes: null,
+  imageUrl: null
+}
+```
+
+Шаги должны сохранять исходный порядок.
+
+Не создавать database IDs и positions.
+
+---
+
+# Step 17 — группы шагов
+
+Поддержать:
+
+```json
+{
+  "@type": "HowToSection",
+  "name": "For the sauce",
+  "itemListElement": [
+    {
+      "@type": "HowToStep",
+      "text": "Add the cream."
+    }
+  ]
+}
+```
+
+Результат:
+
+```ts
+{
+  text: 'Add the cream.',
+  group: 'For the sauce',
+  durationMinutes: null,
+  imageUrl: null
+}
+```
+
+Если группы нет:
+
+```ts
+group: null;
+```
+
+Не создавать искусственные названия.
+
+Если source использует вложенные sections, сохрани порядок шагов и выбери простое понятное правило для group.
+
+Не добавляй отдельную Entity RecipeStepGroup.
+
+Не сортируй шаги по названию группы.
+
+Сохраняй порядок source.
+
+---
+
+# Step 18 — durationMinutes и imageUrl шагов
+
+Если у конкретного шага есть структурированная продолжительность, можно заполнить:
+
+```ts
+durationMinutes;
+```
+
+Если источником предоставлено изображение шага:
+
+```ts
+imageUrl;
+```
+
+Нормализуй его аналогично главной картинке рецепта.
+
+Если поля отсутствуют:
+
+```ts
+durationMinutes: null;
+imageUrl: null;
+```
+
+Пока НЕ извлекать продолжительность из текста:
+
+```text
+Fry for 8-10 minutes
+```
+
+Это отдельная логика, которая сейчас не обязательна.
+
+Не использовать LLM для заполнения пропущенных полей.
+
+---
+
+# Step 19 — HTML внутри текстовых полей
+
+Внешние данные нельзя считать доверенными.
+
+Если title, description или step text содержат HTML:
+
+- не выполнять скрипты;
+- не сохранять исполняемую разметку как текст для будущего dangerouslySetInnerHTML;
+- извлечь безопасное текстовое содержимое;
+- сохранить смысловой текст и необходимые разделители.
+
+Не создавать полноценный HTML sanitizer, если в ParsedRecipe используются только текстовые поля.
+
+Не возвращать необработанный HTML для отображения на frontend.
+
+---
+
+# Step 20 — минимальная проверка результата
+
+Перед успешным возвратом ParsedRecipe нужно убедиться, что результат действительно является рецептом.
+
+Для MVP минимум:
+
+```text
+title — непустой
+ingredients — непустой массив
+steps — непустой массив
+```
+
+Не возвращать успех для объекта:
+
+```ts
+{
+  title: '',
+  ingredients: [],
+  steps: []
+}
+```
+
+Все остальные поля допускают null согласно контракту.
+
+При отсутствии критически важных данных возвращай понятную ошибку.
+
+---
+
+# Step 21 — RecipeParserService
+
+Создай единый entry point:
+
+```ts
+parse(url: string): Promise<ParsedRecipe>
+```
+
+Сервис оркестрирует процесс:
+
+```text
+validate URL
+      ↓
+fetch HTML
+      ↓
+extract JSON-LD
+      ↓
+find Recipe
+      ↓
+normalize
+      ↓
+validate result
+      ↓
+return ParsedRecipe
+```
+
+Не помещай весь алгоритм в один огромный метод.
+
+Но и не создавай отдельный NestJS provider для каждой маленькой pure function.
+
+Где нет необходимости в dependency injection — обычная TypeScript-функция допустима.
+
+---
+
+# Step 22 — NestJS integration
+
+Зарегистрируй parser так, чтобы на этапе 7 его можно было внедрить в RecipeImportProcessor.
+
+Можно использовать существующий RecipesModule или отдельный небольшой ParserModule, если это действительно улучшает структуру.
+
+Не создавай circular dependencies.
+
+Не импортируй в parser:
+
+```text
+RecipeImportQueue
+RecipeImportProcessor
+RecipesService
+TypeORM Repository
+```
+
+Зависимость должна быть направлена так:
+
+```text
+Будущий Processor
+        ↓
+RecipeParserService
+```
+
+Не наоборот.
+
+---
+
+# Step 23 — Error handling
+
+Ошибки парсера должны быть предсказуемыми.
+
+Различай хотя бы:
+
+```text
+Unsupported URL
+Failed to fetch HTML
+Recipe data not found
+Invalid recipe data
+```
+
+Если сайт возвращает 403 или 429, не скрывай этот факт за сообщением «Recipe not found».
+
+Не нужно создавать 15 классов ошибок.
+
+Достаточно минимального понятного подхода.
+
+Не возвращай наружу весь HTML страницы или технические секреты.
+
+На этом этапе не нужно привязывать ошибки к HTTP status codes.
+
+Парсер не является HTTP controller.
+
+---
+
+# Step 24 — подготовка к будущему Retry
+
+На этапе 7 BullMQ будет делать retries.
+
+Поэтому важно понимать различие:
+
+```text
+Temporary failure:
+- timeout
+- connection error
+- 503
+- возможно 429
+```
+
+и:
+
+```text
+Permanent failure:
+- unsupported URL
+- отсутствует Recipe
+- невалидные обязательные данные
+```
+
+Сделай ошибки различимыми настолько, чтобы позже worker мог принять решение о retry.
+
+Но сейчас НЕ меняй настройки BullMQ и не реализовывай retry logic.
+
+Не создавай свою систему очередей поверх BullMQ.
+
+---
+
+# Step 25 — fixtures
+
+Добавь тестовые HTML fixtures.
+
+Предпочтительное расположение:
+
+```text
+src/recipes/parser/__fixtures__/
+```
+
+или другая понятная директория рядом с parser tests.
+
+Нужны:
+
+1. HTML с валидным Recipe JSON-LD.
+2. HTML с JSON-LD внутри @graph.
+3. HTML с массивом JSON-LD objects.
+4. HTML с HowToSection.
+5. HTML без Recipe.
+6. HTML с malformed JSON-LD.
+
+Можно сохранить небольшой реальный пример Good Food, если доступ получен корректно.
+
+Удаляй из fixture ненужные:
+
+```text
+scripts
+analytics
+advertising
+tracking data
+cookies
+```
+
+Не нужно хранить огромную страницу ради трёх полей.
+
+Fixtures должны быть воспроизводимыми и не зависеть от интернета.
+
+Не выдавай синтетический fixture за точную копию реального сайта.
+
+---
+
+# Step 26 — unit tests
+
+Обязательно протестировать:
+
+## URL validation
+
+```text
+supported URL
+unsupported hostname
+localhost
+invalid protocol
+invalid URL
+unsafe redirect
+```
+
+## HTML fetcher
+
+```text
+success
+timeout
+non-HTML
+HTTP error
+oversized response
+```
+
+## JSON-LD extractor
+
+```text
+direct Recipe
+array
+@graph
+multiple scripts
+malformed JSON
+missing Recipe
+```
+
+## Normalizer
+
+```text
+title
+image
+servings
+ISO duration
+ingredients
+steps
+group
+nullable fields
+```
+
+## RecipeParserService
+
+Проверить orchestration.
+
+Использовать моки для внешнего HTTP.
+
+Не обращаться к Good Food из обычных unit tests.
+
+Не подключать PostgreSQL или Redis в unit tests парсера.
+
+---
+
+# Step 27 — реальная проверка Good Food
+
+После успешных unit tests выполнить отдельную live-проверку.
+
+Использовать:
+
+```text
+https://www.bbcgoodfood.com/recipes/marry-me-chicken
+```
+
+Проверить, что backend получает:
+
+```text
+title
+description
+servings
+prepTimeMinutes
+cookTimeMinutes
+ingredients
+steps
+```
+
+Ожидаемые ориентиры для этого рецепта:
+
+```text
+Servings: 4
+Prep: 20 minutes
+Cook: 45 minutes
+```
+
+Эти значения должны быть получены parser-ом, а не захардкожены.
+
+Проверь, сколько ингредиентов и шагов реально извлечено.
+
+Не утверждай, что live parser работает, если страницу невозможно скачать.
+
+Если источник недоступен:
+
+- не обходи ограничения;
+- зафиксируй ошибку;
+- используй fixtures;
+- обозначь live integration как непроверенную.
+
+---
+
+# Step 28 — smoke-test парсера
+
+Предусмотри минимальный способ локально проверить:
+
+```text
+URL
+↓
+RecipeParserService
+↓
+ParsedRecipe
+```
+
+Можно создать небольшой dev-only script.
+
+Не создавать production HTTP endpoint:
+
+```text
+GET /parse?url=...
+```
+
+Не создавать отдельную CLI infrastructure.
+
+Smoke-test должен запускать настоящий parser, а не возвращать заранее прописанный объект.
+
+Если используешь Nest application context — корректно закрывай его.
+
+Не логируй полный HTML.
+
+Можно выводить краткое summary:
+
+```text
+Title
+Servings
+Ingredients count
+Steps count
+```
+
+---
+
+# Step 29 — не изменять Queue
+
+Сейчас НЕ менять:
+
+```text
+recipe-import.queue.ts
+recipe-import.processor.ts
+recipe-import.contract.ts
+```
+
+Не запускать parser внутри worker.
+
+Не менять job payload.
+
+Не менять retries/backoff.
+
+Существующий queue smoke-test должен продолжать работать.
+
+На этапе 7 очередь и парсер будут соединены.
+
+---
+
+# Step 30 — не изменять PostgreSQL
 
 Не менять:
 
 ```text
-Recipe
-RecipeIngredient
-RecipeStep
+Recipe Entity
+RecipeIngredient Entity
+RecipeStep Entity
 RecipeStatus
 ```
 
-Не создавать новую migration без реальной причины.
+Не создавать migration.
 
-Не редактировать существующую:
+Не добавлять parser-specific поля в таблицы.
+
+Не сохранять ParsedRecipe в PostgreSQL.
+
+На этом этапе:
 
 ```text
-CreateInitialSchema
+parse(url)
+↓
+ParsedRecipe
 ```
 
-Бизнес-логика импорта будет реализована позже.
+и всё.
 
 ---
 
-# Step 20 — README
+# Step 31 — frontend scope
 
-Обновить README минимально.
+Frontend не трогаем.
 
-Нужно объяснить:
-
-- что Redis используется для BullMQ;
-- какие Redis env variables нужны;
-- как запустить Redis;
-- как запустить backend;
-- как проверить очередь через smoke-test, если он добавлен.
-
-Не писать большую документацию на десятки страниц.
-
----
-
-# Step 21 — что НЕ входит в этот этап
-
-Категорически не реализовывать:
+Не создавать:
 
 ```text
-POST /recipes/import
-POST /recipes/:id/retry
-
-HTML fetcher
-JSON-LD extractor
-Good Food parser
-AI parser
-
-создание Recipe через API
-обновление Recipe.status
-сохранение Ingredients
-сохранение Steps
-
-Frontend changes
-React Query
-Recipe cards
 Add Recipe modal
-Polling
-WebSockets
-SSE
-Shopping list
+Recipe cards
+Recipe details
+Processing UI
 ```
 
-Следующие этапы:
+Не устанавливать React dependencies.
 
-```text
-Этап 6 — Good Food Parser
-
-Этап 7 — Queue + Parser + PostgreSQL integration
-```
-
-Не переходить к ним автоматически.
+Не добавлять TanStack Query hooks.
 
 ---
 
-# Step 22 — финальные проверки
+# Step 32 — AI scope
 
-Обязательно выполнить:
+AI НЕ используется на этапе 6.
+
+Не подключать:
+
+```text
+OpenAI SDK
+Gemini
+Ollama
+Hugging Face
+LangChain
+```
+
+Не добавлять API keys или model configuration.
+
+Сначала должен работать deterministic JSON-LD parser.
+
+AI fallback — отдельная будущая задача.
+
+---
+
+# Step 33 — ограничения MVP
+
+Не реализовывать сейчас:
+
+- произвольные сайты;
+- много отдельных site parsers;
+- поддержку социальных сетей;
+- browser automation;
+- обход CAPTCHA;
+- AI extraction;
+- ingredient unit conversion;
+- shopping lists;
+- nutrition calculations;
+- automatic recipe translation;
+- сохранение изображений;
+- сложный parser registry.
+
+Не добавлять abstractions только потому, что позже могут появиться другие сайты.
+
+---
+
+# Step 34 — финальные проверки
+
+После реализации выполнить из:
+
+```text
+apps/backend
+```
 
 ```bash
 npm run build
@@ -1146,27 +1464,15 @@ npm run lint
 npm test
 ```
 
-Из:
+Проверить, что существующие тесты Auth, Recipes API и Queue не сломались.
 
-```text
-apps/backend
-```
-
-Также проверить:
+При наличии работающей инфраструктуры отдельно проверить:
 
 ```bash
 npm run migration:show
 ```
 
-Убедиться, что миграции не затронуты.
-
-Из корня проекта:
-
-```bash
-docker compose ps
-```
-
-Проверить реальный smoke-test очереди.
+Миграции должны оставаться без изменений.
 
 Проверить:
 
@@ -1175,117 +1481,157 @@ git status
 git diff
 ```
 
-Не утверждать, что тест прошёл, если он не запускался.
+Убедиться, что не изменены:
 
-Если запуск невозможен из-за окружения — объясни конкретную причину.
+- frontend;
+- Recipe Entity;
+- существующие migrations;
+- BullMQ producer/processor;
+- Auth.
+
+Если что-то изменилось — объясни почему.
+
+Не выполнять автоматически Git commit.
 
 ---
 
-# 23. Definition of Done
+# 35. Definition of Done
 
-Этап 5 считается завершённым, если:
+Этап 6 готов только если:
 
-- [ ] BullMQ установлен и подключён к NestJS.
-- [ ] Используется `@nestjs/bullmq`, а не старый Bull.
-- [ ] Redis host/port берутся из env.
-- [ ] Redis env variables валидируются.
-- [ ] Redis persistence настроена и проверена в доступных пределах.
-- [ ] Очередь `recipe-import` зарегистрирована.
-- [ ] Job `import-recipe` имеет единый типизированный payload.
-- [ ] Producer создан.
-- [ ] Producer использует `queue.add()`.
-- [ ] Processor создан.
-- [ ] Processor использует `WorkerHost`.
-- [ ] Processor получает правильный `recipeId`.
-- [ ] Job успешно завершается.
-- [ ] Ошибки не проглатываются.
-- [ ] Completed/Failed events логируются.
-- [ ] Retry/backoff настроены.
-- [ ] Проверено поведение подключений и остановки приложения.
+- [ ] Текущий backend изучен.
+- [ ] URL validation реализована.
+- [ ] Поддерживается только разрешённый Good Food hostname.
+- [ ] Unsafe URL отклоняется.
+- [ ] Redirect policy безопасна.
+- [ ] HTML fetcher реализован.
+- [ ] Fetch timeout работает.
+- [ ] HTTP errors обрабатываются.
+- [ ] HTML size limit работает.
+- [ ] JSON-LD scripts извлекаются.
+- [ ] Поддерживаются object, array и @graph.
+- [ ] Recipe обнаруживается корректно.
+- [ ] Создан ParsedRecipe contract.
+- [ ] title нормализуется.
+- [ ] description нормализуется.
+- [ ] imageUrl нормализуется.
+- [ ] servings нормализуется.
+- [ ] prepTimeMinutes нормализуется.
+- [ ] cookTimeMinutes нормализуется.
+- [ ] rawText ингредиентов сохраняется.
+- [ ] Простые quantity/unit извлекаются.
+- [ ] Неоднозначные значения не выдумываются.
+- [ ] HowToStep поддерживается.
+- [ ] HowToSection поддерживается.
+- [ ] group заполняется при наличии.
+- [ ] group = null при отсутствии.
+- [ ] durationMinutes поддерживается при наличии данных.
+- [ ] imageUrl шага поддерживается.
+- [ ] Порядок ингредиентов и шагов сохраняется.
+- [ ] Обязательные поля проверяются.
+- [ ] Ошибки парсера контролируемы.
+- [ ] RecipeParserService возвращает ParsedRecipe.
+- [ ] NestJS integration работает.
 - [ ] Unit tests проходят.
-- [ ] Реальный smoke-test с Redis проходит.
+- [ ] Fixtures созданы.
+- [ ] Live-проверка выполнена либо её блокирующая причина явно зафиксирована.
+- [ ] Parser smoke-test работает, если live-доступ доступен.
 - [ ] Backend build проходит.
 - [ ] Backend lint проходит.
-- [ ] Существующие tests проходят.
+- [ ] Существующие тесты проходят.
+- [ ] Очередь не изменена.
+- [ ] Entity не изменены.
 - [ ] Миграции не изменены.
-- [ ] Recipe Entity не изменена.
-- [ ] Auth и Recipes API не сломаны.
-- [ ] Frontend не изменялся.
-- [ ] Parser не реализован.
-- [ ] Новые production HTTP endpoints не создавались.
+- [ ] Frontend не изменён.
+- [ ] Импорт API не реализован.
+- [ ] AI не добавлен.
 
 ---
 
-# 24. Финальный review
+# 36. Финальный review
 
-После завершения не переходи к Этапу 6.
+После реализации не переходи к этапу 7.
 
-Дай отчёт.
+Составь отчёт.
 
 ## Что изменено
 
-Перечисли файлы и назначение изменений.
+Перечисли файлы и назначение.
 
-## Архитектура
+## Parser architecture
 
 Покажи итоговую цепочку:
 
 ```text
-Producer
-   |
-   v
-BullMQ
-   |
-   v
-Redis
-   |
-   v
-Processor
+URL
+ ↓
+Fetcher
+ ↓
+Extractor
+ ↓
+Normalizer
+ ↓
+ParsedRecipe
 ```
 
-## Configuration
+## Реальный рецепт
 
-Объясни, откуда берутся Redis host/port.
+Покажи краткий результат обработки тестовой страницы.
 
-## Retry
+Например:
 
-Покажи настройки и объясни поведение при ошибке.
+```text
+Title
+Servings
+Prep time
+Cook time
+Ingredients count
+Steps count
+```
+
+Не показывай полный рецепт, если это не требуется для проверки.
+
+## Security
+
+Какие URL ограничения и fetch protections реализованы.
+
+Отдельно укажи, какие риски остались.
 
 ## Tests
 
-Укажи, какие тесты реально запускались.
-
-## Manual verification
-
-Опиши результат реального добавления и обработки job.
+Какие тесты реально выполнялись.
 
 ## MUST FIX
 
-Проблемы, блокирующие следующий этап.
+Блокирующие проблемы.
 
 ## SHOULD IMPROVE
 
-Желательные неблокирующие изменения.
+Желательные изменения.
 
 ## OPTIONAL
 
-То, что можно оставить на будущее.
+Будущие улучшения.
 
 ## VERDICT
 
-Однозначно укажи:
+Напиши:
 
 ```text
-Этап 5 готов к переходу на Этап 6
+Этап 6 готов к переходу на Этап 7
 ```
 
 или:
 
 ```text
-Этап 5 пока не готов
+Этап 6 пока не готов
 ```
 
-С объяснением причины.
+с объяснением.
+
+Если unit tests проходят, но live-парсинг проверить невозможно, явно раздели готовность реализации и неподтверждённую интеграцию с внешним сайтом.
+
+Не выдавай непроверенное за работающее.
 
 Обнови:
 
@@ -1293,35 +1639,60 @@ Processor
 apps/codex/AGENT_PROGRESS.md
 ```
 
-Зафиксируй там:
+Зафиксируй:
 
 - новые зависимости;
+- структуру parser;
 - архитектурные решения;
-- изменённые файлы;
-- результаты проверок;
-- особенности Redis;
+- ограничения;
+- результаты тестов;
+- результат live-проверки;
 - следующий этап.
 
-Не создавай Git commit без моего разрешения.
+---
+
+# 37. Следующий этап
+
+После моего отдельного разрешения:
+
+**Этап 7 — Full Recipe Import Pipeline.**
+
+Там мы соединим:
+
+```text
+POST /recipes/import
+        ↓
+Recipe PENDING
+        ↓
+BullMQ
+        ↓
+RecipeImportProcessor
+        ↓
+RecipeParserService
+        ↓
+PostgreSQL transaction
+        ↓
+COMPLETED / FAILED
+```
+
+Но сейчас этого не делать.
 
 ---
 
 # Начало работы
 
-Начни только с:
+Начни только со Step 1 — аудит текущего backend и выбор библиотек.
 
-**Step 1 — аудит Redis и текущего backend.**
+Пока ничего не изменяй.
 
-Пока ничего не меняй.
+После аудита покажи:
 
-Сначала покажи:
+1. Что уже готово для parser.
+2. Какие зависимости нужны.
+3. Как будет устроен HTML fetcher.
+4. Как будем извлекать JSON-LD.
+5. Как обеспечим безопасность URL.
+6. Какую структуру файлов предлагаешь.
+7. Какие технические риски обнаружены.
 
-1. какие зависимости нужно установить;
-2. какие Redis-настройки уже существуют;
-3. как настроить Redis connection;
-4. куда зарегистрировать BullMQ;
-5. предлагаемую структуру файлов;
-6. какие проблемы ты обнаружил;
-7. с какого изменения предлагаешь начать.
-
-После аудита остановись и дождись моего ответа.
+После этого остановись и дождись моего ответа.
