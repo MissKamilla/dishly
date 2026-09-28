@@ -2,7 +2,14 @@ jest.mock('@nestjs/typeorm', () => ({
   InjectRepository: () => () => undefined,
 }));
 
+jest.mock('@nestjs/bullmq', () => ({
+  InjectQueue: () => () => undefined,
+}));
+
+import { HttpStatus } from '@nestjs/common';
+import { HTTP_CODE_METADATA } from '@nestjs/common/constants';
 import { RecipeStatus } from './enums/recipe-status.enum';
+import { RecipeImportService } from './import/recipe-import.service';
 import { RecipesController } from './recipes.controller';
 import { RecipesService } from './recipes.service';
 import { RecipeListItemResponse } from './types/recipe-response.types';
@@ -13,6 +20,9 @@ describe('RecipesController', () => {
     findOneForUser: jest.Mock;
     deleteForUser: jest.Mock;
   };
+  let recipeImportService: {
+    requestImport: jest.Mock;
+  };
   let recipesController: RecipesController;
 
   beforeEach(() => {
@@ -21,8 +31,12 @@ describe('RecipesController', () => {
       findOneForUser: jest.fn(),
       deleteForUser: jest.fn(),
     };
+    recipeImportService = {
+      requestImport: jest.fn(),
+    };
     recipesController = new RecipesController(
       recipesService as unknown as RecipesService,
+      recipeImportService as unknown as RecipeImportService,
     );
   });
 
@@ -42,6 +56,44 @@ describe('RecipesController', () => {
         RecipeStatus.PENDING,
         RecipeStatus.PROCESSING,
       ]);
+    });
+  });
+
+  describe('importRecipe', () => {
+    it('requests an import for the current user and returns 202 metadata', async () => {
+      const response = {
+        id: 42,
+        title: null,
+        sourceUrl: 'https://www.bbcgoodfood.com/recipes/example',
+        imageUrl: null,
+        servings: null,
+        prepTimeMinutes: null,
+        cookTimeMinutes: null,
+        status: RecipeStatus.PENDING,
+        createdAt: new Date('2026-09-28T10:00:00.000Z'),
+        updatedAt: new Date('2026-09-28T10:00:00.000Z'),
+      };
+      recipeImportService.requestImport.mockResolvedValue(response);
+
+      await expect(
+        recipesController.importRecipe(
+          { id: 7 },
+          { url: 'https://www.bbcgoodfood.com/recipes/example' },
+        ),
+      ).resolves.toBe(response);
+
+      expect(recipeImportService.requestImport).toHaveBeenCalledWith(
+        7,
+        'https://www.bbcgoodfood.com/recipes/example',
+      );
+      const importRecipeHandler = Object.getOwnPropertyDescriptor(
+        RecipesController.prototype,
+        'importRecipe',
+      )?.value as object;
+
+      expect(Reflect.getMetadata(HTTP_CODE_METADATA, importRecipeHandler)).toBe(
+        HttpStatus.ACCEPTED,
+      );
     });
   });
 

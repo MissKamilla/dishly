@@ -1,6 +1,20 @@
 # Рабочие заметки Codex по Dishly
 
-Последнее обновление: 2026-09-23.
+Последнее обновление: 2026-09-28.
+
+## Этап 7 — Full Recipe Import Pipeline
+
+- Текущая ветка: `feature/recipe-import-pipeline`.
+- Step 1: проведён аудит integration points. Существующие `RecipesService`, mapper, `RecipeImportQueue`, `RecipeParserService`, Entity и TypeORM setup подходят для переиспользования. Import workflow будет выделен в `RecipeImportService`; для атомарного сохранения результата доступен injected `DataSource`. Проверенная реализация BullMQ 6.3.6 определяет возможность следующего retry через `job.attemptsMade + 1 < job.opts.attempts`; permanent errors можно завершать через `UnrecoverableError`. Изменение схемы и migration не требуются.
+- Step 2: создан `ImportRecipeDto` с единственным полем `url`. Поле обязательно должно быть строкой, не может быть пустым и ограничено 2048 символами. Domain/SSRF validation намеренно не добавлялась в DTO и остаётся Step 3. Добавлены focused tests для valid, missing, empty, non-string и слишком длинного значения. Проверка: `npm test -- import-recipe.dto.spec.ts --runInBand` — 1 suite, 5 tests passed; backend build и focused ESLint без `--fix` прошли.
+- Step 3: подтверждена единая точка ранней domain validation — существующий `validateGoodFoodUrl()`. Второй allowlist и HTTP-specific wrapper не создавались. Validator возвращает `URL` и уже отклоняет invalid URL, HTTP, localhost/IP, неподдерживаемые hostname, credentials и нестандартные порты. При создании `RecipeImportService.requestImport()` на Step 5 он должен вызываться первым, до repository INSERT и `queue.enqueue()`; parser остаётся независимым от HTTP exceptions. Проверка: `npm test -- url-validator.spec.ts --runInBand` — 1 suite, 20 tests passed.
+- Step 4: canonical `sourceUrl` определён как `URL.href`, возвращённый `validateGoodFoodUrl()`, без дополнительных эвристик. Стандартная URL normalization удаляет default port и разрешает dot-segments, сохраняя query/hash. Добавлен regression test этого контракта; проверка фактически сохранённого значения будет добавлена вместе с persistence workflow. Проверка: `npm test -- url-validator.spec.ts --runInBand` — 1 suite, 21 test passed; focused ESLint без `--fix` прошёл.
+- Step 5: создан отдельный `RecipeImportService` в `recipes/import/` и зарегистрирован provider-ом в существующем `RecipesModule`. Отдельный module/export не добавлялся: будущие consumers находятся внутри `RecipesModule`. Service пока не содержит фиктивных методов или неиспользуемых зависимостей; Repository, Queue и DataSource будут добавляться вместе с реальным поведением следующих шагов. Проверка: backend build и focused ESLint без `--fix` прошли.
+- Step 6: в `RecipeImportService` добавлен `requestImport(userId, inputUrl)`. Метод до Repository-вызовов проверяет URL через существующий `validateGoodFoodUrl()`, преобразует validation failure в безопасный `BadRequestException`, сохраняет canonical `URL.href` и создаёт только Recipe со статусом `PENDING`; parsed-поля и `errorMessage` явно равны null. `userId` принимается отдельно от DTO. Ingredients/steps и queue job не создаются. Возвращается существующий `RecipeListItemResponse`, а не Entity. Focused tests проверяют canonical URL, начальные поля и отсутствие repository calls для unsupported domain/localhost. Проверка: 1 suite, 3 tests passed; backend build и focused ESLint без `--fix` прошли.
+- Step 7: `RecipeImportQueue` внедрён в `RecipeImportService`; после успешного `repository.save()` вызывается `enqueue(savedRecipe.id)`. Import service не передаёт в очередь URL, userId, Entity или ParsedRecipe; существующий queue producer самостоятельно формирует минимальный payload `{ recipeId }`. Тест проверяет ID, порядок `save → enqueue` и отсутствие enqueue при ранней URL validation error. Для CommonJS Jest локально замокан только ESM decorator `InjectQueue`, без изменения production/global test config. Проверка: service + queue — 2 suites, 5 tests passed; backend build и focused ESLint без `--fix` прошли.
+- Step 8: обработана неатомарность PostgreSQL INSERT и Redis enqueue без transactional outbox. Если enqueue падает, service выполняет условный update по `id + status=PENDING`, переводит Recipe в `FAILED`, сохраняет безопасный код `queue_unavailable` и выбрасывает `ServiceUnavailableException` с безопасным HTTP message; исходная queue error остаётся только в `cause`. В коде зафиксировано, что outbox может заменить компенсацию при будущих требованиях к delivery guarantees. Тест подтверждает compensation и отсутствие update на success/validation failure. Проверка: service + queue — 2 suites, 6 tests passed; backend build и focused ESLint без `--fix` прошли.
+- Step 9: добавлен защищённый по умолчанию `POST /recipes/import`. Controller получает `@CurrentUser()` и `ImportRecipeDto`, передаёт только `user.id` и `dto.url` в `RecipeImportService.requestImport()` и отвечает существующим `RecipeListItemResponse`; route имеет `202 Accepted`. `@Public()` не добавлялся, поэтому действует global `JwtAuthGuard`. Job/Redis/userId/internal error fields не возвращаются. Controller test проверяет delegation и HTTP status metadata. Проверка: controller/import service/DTO — 3 suites, 13 tests passed; backend build и focused ESLint без `--fix` прошли.
+- Следующий шаг: Step 10 — processor должен загрузить Recipe из PostgreSQL по `job.data.recipeId`. Не начинать без отдельной команды разработчика.
 
 ## Этап 6 — Good Food Recipe Parser
 
@@ -51,9 +65,9 @@
 ## Текущий контекст
 
 - Проект: Dishly.
-- Текущий этап: Этап 6 - Good Food Recipe Parser завершен; следующий — Этап 7 только после отдельного разрешения.
-- Текущая ветка: `feature/recipe-parser` (проверена 2026-09-22).
-- Главный принцип этапа: получить `ParsedRecipe` из Good Food URL без очереди и PostgreSQL.
+- Текущий этап: Этап 7 — Full Recipe Import Pipeline; Step 9 завершён.
+- Текущая ветка: `feature/recipe-import-pipeline` (проверена 2026-09-28).
+- Следующий шаг: Step 10 — начать реальную worker orchestration с загрузки Recipe по ID.
 - Исторические коммиты, отмеченные при завершении Этапа 5:
   - `69fdfee Merge pull request #1 from MissKamilla/feature/project-bootstrap`
   - `f017d83 feat: complete project bootstrap`

@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { RecipeIngredient } from './entities/recipe-ingredient.entity';
 import { RecipeStep } from './entities/recipe-step.entity';
 import { Recipe } from './entities/recipe.entity';
+import { RecipeImportService } from './import/recipe-import.service';
 import { RecipeParserService } from './parser/recipe-parser.service';
 import { RECIPE_IMPORT_QUEUE } from './queue/recipe-import.contract';
 import { RecipeImportProcessor } from './queue/recipe-import.processor';
@@ -22,6 +23,7 @@ import { RecipesService } from './recipes.service';
   controllers: [RecipesController],
   providers: [
     RecipesService,
+    RecipeImportService,
     RecipeImportQueue,
     RecipeImportProcessor,
     RecipeParserService,

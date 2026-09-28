@@ -11,6 +11,16 @@ describe('validateGoodFoodUrl', () => {
     );
   });
 
+  it('returns the canonical URL without applying custom normalization', () => {
+    const url = validateGoodFoodUrl(
+      'https://www.bbcgoodfood.com:443/recipes/../recipes/example?ref=test#method',
+    );
+
+    expect(url.href).toBe(
+      'https://www.bbcgoodfood.com/recipes/example?ref=test#method',
+    );
+  });
+
   it.each([
     'not a URL',
     '/recipes/marry-me-chicken',
