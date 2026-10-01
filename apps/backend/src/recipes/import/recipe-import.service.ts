@@ -9,6 +9,7 @@ import { RecipeIngredient } from '../entities/recipe-ingredient.entity';
 import { RecipeStep } from '../entities/recipe-step.entity';
 import { Recipe } from '../entities/recipe.entity';
 import { RecipeStatus } from '../enums/recipe-status.enum';
+import { RecipeParserErrorCode } from '../parser/recipe-parser.error';
 import { ParsedRecipe } from '../parser/types/parsed-recipe';
 import { validateGoodFoodUrl } from '../parser/url-validator';
 import { RecipeImportQueue } from '../queue/recipe-import.queue';
@@ -82,6 +83,19 @@ export class RecipeImportService {
     );
 
     return result.affected === 1;
+  }
+
+  async failImport(
+    recipeId: number,
+    errorCode: RecipeParserErrorCode | 'unexpected_import_error',
+  ): Promise<void> {
+    await this.recipesRepository.update(
+      {
+        id: recipeId,
+        status: In([RecipeStatus.PENDING, RecipeStatus.PROCESSING]),
+      },
+      { status: RecipeStatus.FAILED, errorMessage: errorCode },
+    );
   }
 
   completeImport(

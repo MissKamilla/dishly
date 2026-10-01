@@ -10,9 +10,13 @@ jest.mock('@nestjs/typeorm', () => ({
 }));
 
 import { Logger } from '@nestjs/common';
-import { Job } from 'bullmq';
+import { Job, UnrecoverableError } from 'bullmq';
 import { RecipeStatus } from '../enums/recipe-status.enum';
 import { RecipeImportService } from '../import/recipe-import.service';
+import {
+  RecipeParserError,
+  RecipeParserErrorCode,
+} from '../parser/recipe-parser.error';
 import { ParsedRecipe } from '../parser/types/parsed-recipe';
 import { IMPORT_RECIPE_JOB } from './recipe-import.contract';
 import { RecipeImportProcessor } from './recipe-import.processor';
@@ -22,6 +26,7 @@ describe('RecipeImportProcessor', () => {
   let recipeImportService: {
     findForProcessing: jest.Mock;
     prepareForProcessing: jest.Mock;
+    failImport: jest.Mock;
     completeImport: jest.Mock;
   };
   let recipeParserService: {
@@ -41,6 +46,7 @@ describe('RecipeImportProcessor', () => {
         sourceUrl: 'https://www.bbcgoodfood.com/recipes/example',
       }),
       prepareForProcessing: jest.fn().mockResolvedValue(true),
+      failImport: jest.fn().mockResolvedValue(undefined),
       completeImport: jest.fn().mockResolvedValue(true),
     };
     recipeParserService = {
@@ -60,7 +66,7 @@ describe('RecipeImportProcessor', () => {
   });
 
   it('processes a valid import job and reads its recipe id', async () => {
-    const job = createJob(IMPORT_RECIPE_JOB, { recipeId: 42 });
+    const job = createAttemptJob(0);
 
     await expect(processor.process(job)).resolves.toBeUndefined();
     expect(recipeImportService.findForProcessing).toHaveBeenCalledWith(42);
@@ -72,7 +78,9 @@ describe('RecipeImportProcessor', () => {
       42,
       parsedRecipe,
     );
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('recipe 42'));
+    expect(logSpy).toHaveBeenCalledWith(
+      'Processing recipe import job 1 for recipe 42, attempt 1/3',
+    );
     expect(warnSpy).not.toHaveBeenCalled();
   });
 
@@ -108,6 +116,157 @@ describe('RecipeImportProcessor', () => {
     );
     expect(recipeParserService.parse).not.toHaveBeenCalled();
     expect(recipeImportService.completeImport).not.toHaveBeenCalled();
+  });
+
+  it('marks a permanent parser error failed and stops BullMQ retries', async () => {
+    const parserError = new RecipeParserError(
+      RecipeParserErrorCode.RECIPE_NOT_FOUND,
+      '<html>Private page</html> cookie=fake-session',
+      null,
+    );
+    recipeParserService.parse.mockRejectedValue(parserError);
+    const job = createJob(IMPORT_RECIPE_JOB, { recipeId: 42 });
+
+    await expect(processor.process(job)).rejects.toMatchObject({
+      constructor: UnrecoverableError,
+      message: RecipeParserErrorCode.RECIPE_NOT_FOUND,
+    });
+
+    expect(recipeImportService.failImport).toHaveBeenCalledWith(
+      42,
+      RecipeParserErrorCode.RECIPE_NOT_FOUND,
+    );
+    expect(recipeImportService.failImport).toHaveBeenCalledTimes(1);
+    expect(recipeImportService.completeImport).not.toHaveBeenCalled();
+  });
+
+  it.each([0, 1])(
+    'keeps the recipe processing after retryable failure %i of 3',
+    async (attemptsMade) => {
+      const parserError = new RecipeParserError(
+        RecipeParserErrorCode.FETCH_FAILED,
+        'Good Food request timed out',
+        null,
+        true,
+      );
+      recipeParserService.parse.mockRejectedValue(parserError);
+      const job = {
+        ...createJob(IMPORT_RECIPE_JOB, { recipeId: 42 }),
+        attemptsMade,
+        attemptsStarted: attemptsMade + 1,
+        opts: { attempts: 3 },
+      } as Job<unknown>;
+
+      await expect(processor.process(job)).rejects.toBe(parserError);
+
+      expect(recipeImportService.prepareForProcessing).toHaveBeenCalledWith(42);
+      expect(recipeImportService.failImport).not.toHaveBeenCalled();
+      expect(recipeImportService.completeImport).not.toHaveBeenCalled();
+    },
+  );
+
+  it('marks the recipe failed after the final retryable parser failure', async () => {
+    const parserError = new RecipeParserError(
+      RecipeParserErrorCode.FETCH_FAILED,
+      'Good Food request timed out: JWT fake-token',
+      null,
+      true,
+    );
+    recipeParserService.parse.mockRejectedValue(parserError);
+    const job = {
+      ...createJob(IMPORT_RECIPE_JOB, { recipeId: 42 }),
+      attemptsMade: 2,
+      attemptsStarted: 3,
+      opts: { attempts: 3 },
+    } as Job<unknown>;
+
+    await expect(processor.process(job)).rejects.toBe(parserError);
+
+    expect(recipeImportService.failImport).toHaveBeenCalledWith(
+      42,
+      RecipeParserErrorCode.FETCH_FAILED,
+    );
+    expect(recipeImportService.failImport).toHaveBeenCalledTimes(1);
+    expect(recipeImportService.completeImport).not.toHaveBeenCalled();
+  });
+
+  it('retries an unexpected error without marking the recipe failed early', async () => {
+    const error = new Error('Unexpected parser bug');
+    recipeParserService.parse.mockRejectedValue(error);
+
+    await expect(processor.process(createAttemptJob(1))).rejects.toBe(error);
+
+    expect(recipeImportService.failImport).not.toHaveBeenCalled();
+  });
+
+  it('marks an unexpected parser error failed after the last attempt', async () => {
+    const error = new Error('Unexpected parser bug: password=fake-secret');
+    recipeParserService.parse.mockRejectedValue(error);
+
+    await expect(processor.process(createAttemptJob(2))).rejects.toBe(error);
+
+    expect(recipeImportService.failImport).toHaveBeenCalledWith(
+      42,
+      'unexpected_import_error',
+    );
+    expect(recipeImportService.failImport).toHaveBeenCalledTimes(1);
+  });
+
+  it('converts a non-Error rejection into an Error for BullMQ', async () => {
+    recipeParserService.parse.mockRejectedValue('unexpected value');
+
+    await expect(processor.process(createAttemptJob(1))).rejects.toMatchObject({
+      message: 'Unexpected recipe import failure',
+      cause: 'unexpected value',
+    });
+
+    expect(recipeImportService.failImport).not.toHaveBeenCalled();
+  });
+
+  it('marks a failed database save after the last attempt', async () => {
+    const error = new Error('Database write failed');
+    recipeImportService.completeImport.mockRejectedValue(error);
+
+    await expect(processor.process(createAttemptJob(2))).rejects.toBe(error);
+
+    expect(recipeImportService.failImport).toHaveBeenCalledWith(
+      42,
+      'unexpected_import_error',
+    );
+  });
+
+  it('keeps the original error if updating the failed status also fails', async () => {
+    const originalError = new Error('Database read failed');
+    const statusError = new Error('Database update failed');
+    recipeImportService.findForProcessing.mockRejectedValue(originalError);
+    recipeImportService.failImport.mockRejectedValue(statusError);
+
+    await expect(processor.process(createAttemptJob(2))).rejects.toBe(
+      originalError,
+    );
+
+    expect(recipeImportService.failImport).toHaveBeenCalledWith(
+      42,
+      'unexpected_import_error',
+    );
+    expect(errorSpy).toHaveBeenCalledWith(
+      'Recipe import job 1 for recipe 42: status_update_failed',
+    );
+  });
+
+  it('lets BullMQ retry if a permanent error cannot be saved', async () => {
+    const parserError = new RecipeParserError(
+      RecipeParserErrorCode.RECIPE_NOT_FOUND,
+      'External recipe data missing',
+      null,
+    );
+    const statusError = new Error('Database update failed');
+    recipeParserService.parse.mockRejectedValue(parserError);
+    recipeImportService.failImport.mockRejectedValue(statusError);
+
+    await expect(processor.process(createAttemptJob(0))).rejects.toBe(
+      statusError,
+    );
   });
 
   it.each([RecipeStatus.COMPLETED, RecipeStatus.FAILED])(
@@ -174,11 +333,19 @@ describe('RecipeImportProcessor', () => {
     expect(logSpy).not.toHaveBeenCalled();
   });
 
+  it('logs job completion with recipe and attempt ids', () => {
+    processor.onCompleted(createAttemptJob(1));
+
+    expect(logSpy).toHaveBeenCalledWith(
+      'Recipe import job 1 for recipe 42 completed on attempt 1/3',
+    );
+  });
+
   it.each([
     [1, 3],
     [3, 3],
   ])('logs failed attempt %i of %i', (attemptsMade, attempts) => {
-    const error = new Error('Processing failed');
+    const error = new Error('password=fake-secret <html>Private page</html>');
     const job = {
       ...createJob(IMPORT_RECIPE_JOB, { recipeId: 42 }),
       attemptsMade,
@@ -188,8 +355,33 @@ describe('RecipeImportProcessor', () => {
     processor.onFailed(job, error);
 
     expect(errorSpy).toHaveBeenCalledWith(
-      expect.stringContaining(`attempt ${attemptsMade}/${attempts} failed`),
-      error.stack,
+      `Recipe import job 1 for recipe 42 attempt ${attemptsMade}/${attempts} failed: unexpected_import_error`,
+    );
+  });
+
+  it('logs a parser failure category without its raw message', () => {
+    const error = new RecipeParserError(
+      RecipeParserErrorCode.FETCH_FAILED,
+      'cookie=fake-session',
+      null,
+      true,
+    );
+
+    processor.onFailed(createAttemptJob(1), error);
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      'Recipe import job 1 for recipe 42 attempt 1/3 failed: fetch_failed',
+    );
+  });
+
+  it('logs permanent parser failures without exposing their message', () => {
+    processor.onFailed(
+      createAttemptJob(1),
+      new UnrecoverableError('JWT fake-token'),
+    );
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      'Recipe import job 1 for recipe 42 attempt 1/3 failed: permanent_parser_error',
     );
   });
 });
@@ -199,6 +391,15 @@ function createJob(name: string, data: unknown): Job<unknown> {
     id: '1',
     name,
     data,
+  } as Job<unknown>;
+}
+
+function createAttemptJob(attemptsMade: number): Job<unknown> {
+  return {
+    ...createJob(IMPORT_RECIPE_JOB, { recipeId: 42 }),
+    attemptsMade,
+    attemptsStarted: attemptsMade + 1,
+    opts: { attempts: 3 },
   } as Job<unknown>;
 }
 

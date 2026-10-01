@@ -15,6 +15,7 @@ import { RecipeIngredient } from '../entities/recipe-ingredient.entity';
 import { RecipeStep } from '../entities/recipe-step.entity';
 import { Recipe } from '../entities/recipe.entity';
 import { RecipeStatus } from '../enums/recipe-status.enum';
+import { RecipeParserErrorCode } from '../parser/recipe-parser.error';
 import { ParsedRecipe } from '../parser/types/parsed-recipe';
 import { RecipeImportQueue } from '../queue/recipe-import.queue';
 import { RecipeImportService } from './recipe-import.service';
@@ -170,6 +171,32 @@ describe('RecipeImportService', () => {
       errorMessage: null,
     });
   });
+
+  it.each([
+    RecipeParserErrorCode.RECIPE_NOT_FOUND,
+    'unexpected_import_error' as const,
+  ])(
+    'stores safe error code %s for a processable recipe',
+    async (errorCode) => {
+      await recipeImportService.failImport(42, errorCode);
+
+      const calls = recipesRepository.update.mock.calls as unknown[][];
+      const [criteria, update] = calls[0] as [
+        { id: number; status: FindOperator<RecipeStatus> },
+        Partial<Recipe>,
+      ];
+
+      expect(criteria.id).toBe(42);
+      expect(criteria.status.value).toEqual([
+        RecipeStatus.PENDING,
+        RecipeStatus.PROCESSING,
+      ]);
+      expect(update).toEqual({
+        status: RecipeStatus.FAILED,
+        errorMessage: errorCode,
+      });
+    },
+  );
 
   it('atomically replaces children and completes the recipe', async () => {
     const parsedRecipe = createParsedRecipe();

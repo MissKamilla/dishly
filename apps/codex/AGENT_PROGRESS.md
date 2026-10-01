@@ -1,6 +1,6 @@
 # Рабочие заметки Codex по Dishly
 
-Последнее обновление: 2026-09-28.
+Последнее обновление: 2026-10-01.
 
 ## Этап 7 — Full Recipe Import Pipeline
 
@@ -25,7 +25,14 @@
 - Step 18: ParsedRecipe поля явно сопоставляются Recipe update. Ingredients и steps создаются с `recipeId` и `position: index + 1`, сохраняя rawText/name/quantity/unit и text/group/durationMinutes/imageUrl.
 - Step 19: старые RecipeIngredient/RecipeStep удаляются по конкретному recipeId внутри той же transaction перед вставкой актуальных children; ORM cascade-save не используется.
 - Step 20: Recipe переводится в `COMPLETED` и `errorMessage` очищается только последней database-операцией после успешного сохранения ingredients и steps. Transaction сначала подтверждает существующий `PROCESSING` Recipe; missing/stale Recipe возвращает false и не создаёт children. Focused transaction test проверяет mapping, позиции, transactional repositories, delete/replace и порядок children save до COMPLETED update. Проверка: import service + processor — 2 suites, 23 tests passed; backend build и focused ESLint без `--fix` прошли.
-- Следующий шаг: Step 21 — обработать permanent `RecipeParserError` через `FAILED` и BullMQ `UnrecoverableError`. Не начинать без отдельной команды разработчика.
+- Step 21: processor ловит только постоянный `RecipeParserError` вокруг `parser.parse()`, вызывает `RecipeImportService.failImport(recipeId, error.code)` и выбрасывает BullMQ `UnrecoverableError(error.code)`. Service условно переводит `PROCESSING → FAILED` и сохраняет только безопасный код ошибки; raw external message в БД не попадает. Настройки `attempts: 3` не менялись; ошибки persistence и retryable parser errors этот catch не преобразует. Focused tests проверяют database update и реальный тип `UnrecoverableError`. Проверка: 2 suites, 25 tests passed; backend build и focused ESLint без `--fix` прошли.
+- Step 22: существующий processor уже пробрасывает retryable `RecipeParserError` без вызова `failImport`; Recipe остаётся `PROCESSING`, а BullMQ применяет существующие `attempts: 3` и exponential backoff. Добавлен focused test на проброс той же ошибки и отсутствие FAILED/COMPLETED operations. Проверка: processor + queue — 2 suites, 20 tests passed; backend build и focused ESLint прошли. Финальная неудачная попытка относится к Step 23 и пока не реализована.
+- Step 23: проверена семантика установленного BullMQ: `attemptsMade` увеличивается после обработки failed attempt; перед попытками 1/2/3 его значения 0/1/2, а retry допускается при `attemptsMade + 1 < attempts`. Добавлен `isFinalAttempt(job)`; на последней retryable parser error processor переводит `PROCESSING → FAILED` с безопасным error code и пробрасывает исходную ошибку в BullMQ. На промежуточных попытках status не меняется. `attemptsStarted` не используется, так как считает старты, а не завершённые неудачи. Тесты покрывают все три попытки; import service + processor — 2 suites, 28 tests passed; backend build и focused ESLint прошли.
+- Step 24: обработка ошибок охватывает весь import workflow после validation job, включая загрузку Recipe, смену статуса, parser и transaction. Неожиданные `Error` без изменений доходят до BullMQ; non-Error rejection превращается в `Error` с исходным cause. На промежуточных попытках работает обычный retry, на последней выполняется условный `PENDING/PROCESSING → FAILED` с безопасным `unexpected_import_error`; если update тоже падает, логируется ошибка записи, но исходный `Error` не заменяется. Для постоянной parser error сохранено прежнее поведение `UnrecoverableError` после успешного status update; если update падает, BullMQ получает ошибку БД для повтора. Тесты покрывают parser/database errors, границу попыток и сбой status update. Проверка: 24 suites, 293 tests passed; backend build, focused ESLint и `git diff --check` прошли.
+- Step 25: аудит присваиваний `Recipe.errorMessage` подтвердил: сохраняются только фиксированные коды `queue_unavailable`, `unexpected_import_error` или значения `RecipeParserErrorCode`; сырые HTML, сообщения ошибок и stack trace не записываются. Processor tests усилены фиктивными сообщениями с HTML/cookie/JWT/password и проверкой единственного вызова `failImport` с безопасным кодом. Production code не менялся. Проверка: import service + processor — 2 suites, 35 tests passed; backend build, focused ESLint и `git diff --check` прошли.
+- Step 26: проверено, что `GET /recipes`, `GET /recipes/:id` и `POST /recipes/import` возвращают явные response DTO через `toRecipeListItemResponse`/`toRecipeDetailsResponse`; `errorMessage` в этих DTO и мапперах отсутствует. Добавлен mapper regression test: Recipe со статусом `FAILED` отдаёт этот статус в list/details, но не отдаёт внутренний `errorMessage`. Production code не менялся. Проверка: mapper/service/controller/import service — 4 suites, 25 tests passed; backend build, focused ESLint и `git diff --check` прошли.
+- Step 27: processor логирует job id, recipe id и номер попытки при начале job, completed event и failed event; failed event выводит только безопасную категорию (`RecipeParserError.code`, `permanent_parser_error` или `unexpected_import_error`). Сырые `error.message` и stack trace удалены из failed/status-update логов, чтобы HTML/JWT/cookie/password не попадали в них. Tests проверяют категории и отсутствие внешних сообщений в логах. Проверка: полный backend suite — 24 suites, 297 tests passed; backend build, focused ESLint и `git diff --check` прошли.
+- Следующий шаг: Step 28 — Manual Retry API. Не начинать без отдельной команды разработчика.
 
 ## Этап 6 — Good Food Recipe Parser
 
@@ -76,9 +83,9 @@
 ## Текущий контекст
 
 - Проект: Dishly.
-- Текущий этап: Этап 7 — Full Recipe Import Pipeline; Steps 15–20 завершены.
+- Текущий этап: Этап 7 — Full Recipe Import Pipeline; Step 27 завершён.
 - Текущая ветка: `feature/recipe-import-pipeline` (проверена 2026-09-28).
-- Следующий шаг: Step 21 — permanent parser errors без лишних BullMQ retries.
+- Следующий шаг: Step 28 — Manual Retry API.
 - Исторические коммиты, отмеченные при завершении Этапа 5:
   - `69fdfee Merge pull request #1 from MissKamilla/feature/project-bootstrap`
   - `f017d83 feat: complete project bootstrap`
