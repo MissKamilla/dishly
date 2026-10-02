@@ -8,6 +8,8 @@ jest.mock('@nestjs/bullmq', () => ({
 
 import {
   BadRequestException,
+  ConflictException,
+  NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { DataSource, EntityManager, FindOperator, Repository } from 'typeorm';
@@ -124,6 +126,125 @@ describe('RecipeImportService', () => {
         errorMessage: 'queue_unavailable',
       },
     );
+  });
+
+  it('returns 404 for a missing or other-user recipe retry', async () => {
+    recipesRepository.update.mockResolvedValue({ affected: 0 });
+    recipesRepository.findOneBy.mockResolvedValue(null);
+
+    await expect(
+      recipeImportService.requestRetry(7, 42),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    expect(recipesRepository.findOneBy).toHaveBeenCalledWith({
+      id: 42,
+      userId: 7,
+    });
+    expect(recipesRepository.update).toHaveBeenCalledWith(
+      { id: 42, userId: 7, status: RecipeStatus.FAILED },
+      { status: RecipeStatus.PENDING, errorMessage: null },
+    );
+    expect(recipeImportQueue.enqueue).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    RecipeStatus.PENDING,
+    RecipeStatus.PROCESSING,
+    RecipeStatus.COMPLETED,
+  ])('returns 409 when retrying a %s recipe', async (status) => {
+    recipesRepository.update.mockResolvedValue({ affected: 0 });
+    recipesRepository.findOneBy.mockResolvedValue({ id: 42, status });
+
+    await expect(
+      recipeImportService.requestRetry(7, 42),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(recipesRepository.findOneBy).toHaveBeenCalledWith({
+      id: 42,
+      userId: 7,
+    });
+    expect(recipeImportQueue.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('resets a failed recipe before enqueueing a retry', async () => {
+    await expect(
+      recipeImportService.requestRetry(7, 42),
+    ).resolves.toBeUndefined();
+
+    expect(recipesRepository.update).toHaveBeenCalledWith(
+      { id: 42, userId: 7, status: RecipeStatus.FAILED },
+      { status: RecipeStatus.PENDING, errorMessage: null },
+    );
+    expect(recipesRepository.findOneBy).not.toHaveBeenCalled();
+    expect(recipeImportQueue.enqueue).toHaveBeenCalledWith(42);
+    expect(recipesRepository.update.mock.invocationCallOrder[0]).toBeLessThan(
+      recipeImportQueue.enqueue.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('restores failed status and returns 503 when retry enqueue fails', async () => {
+    const queueError = new Error('Redis unavailable: cookie=fake-session');
+    recipeImportQueue.enqueue.mockRejectedValue(queueError);
+
+    await expect(recipeImportService.requestRetry(7, 42)).rejects.toMatchObject(
+      {
+        constructor: ServiceUnavailableException,
+        message: 'Recipe import is temporarily unavailable',
+        cause: queueError,
+      },
+    );
+
+    expect(recipesRepository.update).toHaveBeenNthCalledWith(
+      1,
+      { id: 42, userId: 7, status: RecipeStatus.FAILED },
+      { status: RecipeStatus.PENDING, errorMessage: null },
+    );
+    expect(recipesRepository.update).toHaveBeenNthCalledWith(
+      2,
+      { id: 42, userId: 7, status: RecipeStatus.PENDING },
+      { status: RecipeStatus.FAILED, errorMessage: 'queue_unavailable' },
+    );
+    expect(recipesRepository.update).toHaveBeenCalledTimes(2);
+    expect(recipesRepository.update.mock.invocationCallOrder[0]).toBeLessThan(
+      recipeImportQueue.enqueue.mock.invocationCallOrder[0],
+    );
+    expect(recipeImportQueue.enqueue.mock.invocationCallOrder[0]).toBeLessThan(
+      recipesRepository.update.mock.invocationCallOrder[1],
+    );
+  });
+
+  it('enqueues only once for two concurrent retry requests', async () => {
+    let currentStatus: RecipeStatus = RecipeStatus.FAILED;
+    recipesRepository.update.mockImplementation(
+      (criteria: { status: RecipeStatus }) => {
+        if (currentStatus !== criteria.status) {
+          return Promise.resolve({ affected: 0 });
+        }
+
+        currentStatus = RecipeStatus.PENDING;
+        return Promise.resolve({ affected: 1 });
+      },
+    );
+    recipesRepository.findOneBy.mockImplementation(() =>
+      Promise.resolve({
+        id: 42,
+        status: currentStatus,
+      }),
+    );
+
+    const results = await Promise.allSettled([
+      recipeImportService.requestRetry(7, 42),
+      recipeImportService.requestRetry(7, 42),
+    ]);
+
+    expect(results[0].status).toBe('fulfilled');
+    expect(results[1].status).toBe('rejected');
+    if (results[1].status === 'rejected') {
+      expect(results[1].reason).toBeInstanceOf(ConflictException);
+    }
+    expect(recipesRepository.update).toHaveBeenCalledTimes(2);
+    expect(recipeImportQueue.enqueue).toHaveBeenCalledTimes(1);
+    expect(recipeImportQueue.enqueue).toHaveBeenCalledWith(42);
   });
 
   it.each([
@@ -286,6 +407,42 @@ describe('RecipeImportService', () => {
       transactionalRecipeRepository.update.mock.invocationCallOrder[0],
     );
     expect(recipesRepository.update).not.toHaveBeenCalled();
+  });
+
+  it('does not recreate a recipe deleted before persistence', async () => {
+    const transactionalRecipeRepository = {
+      findOneBy: jest.fn().mockResolvedValue(null),
+      update: jest.fn(),
+    };
+    const transactionalIngredientRepository = createChildRepository();
+    const transactionalStepRepository = createChildRepository();
+    const manager = {
+      getRepository: jest.fn((entity: unknown) => {
+        if (entity === Recipe) return transactionalRecipeRepository;
+        if (entity === RecipeIngredient)
+          return transactionalIngredientRepository;
+        if (entity === RecipeStep) return transactionalStepRepository;
+        throw new Error('Unexpected entity');
+      }),
+    };
+    dataSource.transaction.mockImplementation(
+      (callback: (transactionManager: EntityManager) => Promise<boolean>) =>
+        callback(manager as unknown as EntityManager),
+    );
+
+    await expect(
+      recipeImportService.completeImport(42, createParsedRecipe()),
+    ).resolves.toBe(false);
+
+    expect(transactionalRecipeRepository.findOneBy).toHaveBeenCalledWith({
+      id: 42,
+      status: RecipeStatus.PROCESSING,
+    });
+    expect(transactionalRecipeRepository.update).not.toHaveBeenCalled();
+    expect(transactionalIngredientRepository.delete).not.toHaveBeenCalled();
+    expect(transactionalIngredientRepository.save).not.toHaveBeenCalled();
+    expect(transactionalStepRepository.delete).not.toHaveBeenCalled();
+    expect(transactionalStepRepository.save).not.toHaveBeenCalled();
   });
 });
 

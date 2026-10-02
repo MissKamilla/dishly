@@ -84,6 +84,24 @@ describe('RecipeImportProcessor', () => {
     expect(warnSpy).not.toHaveBeenCalled();
   });
 
+  it('completes without recreating a recipe deleted after parsing', async () => {
+    recipeImportService.completeImport.mockResolvedValue(false);
+
+    await expect(
+      processor.process(createAttemptJob(0)),
+    ).resolves.toBeUndefined();
+
+    expect(recipeParserService.parse).toHaveBeenCalledTimes(1);
+    expect(recipeImportService.completeImport).toHaveBeenCalledWith(
+      42,
+      parsedRecipe,
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('recipe 42 is no longer processing'),
+    );
+    expect(recipeImportService.failImport).not.toHaveBeenCalled();
+  });
+
   it('continues processing a recipe that is already processing', async () => {
     recipeImportService.findForProcessing.mockResolvedValue({
       id: 42,

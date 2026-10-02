@@ -1,6 +1,8 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
+  NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -64,6 +66,43 @@ export class RecipeImportService {
     }
 
     return toRecipeListItemResponse(savedRecipe);
+  }
+
+  async requestRetry(userId: number, recipeId: number): Promise<void> {
+    const result = await this.recipesRepository.update(
+      { id: recipeId, userId, status: RecipeStatus.FAILED },
+      { status: RecipeStatus.PENDING, errorMessage: null },
+    );
+
+    if (result.affected !== 1) {
+      const recipe = await this.recipesRepository.findOneBy({
+        id: recipeId,
+        userId,
+      });
+
+      if (!recipe) {
+        throw new NotFoundException('Recipe not found');
+      }
+
+      throw new ConflictException('Only failed recipes can be retried');
+    }
+
+    try {
+      await this.recipeImportQueue.enqueue(recipeId);
+    } catch (error) {
+      await this.recipesRepository.update(
+        { id: recipeId, userId, status: RecipeStatus.PENDING },
+        {
+          status: RecipeStatus.FAILED,
+          errorMessage: QUEUE_UNAVAILABLE_ERROR,
+        },
+      );
+
+      throw new ServiceUnavailableException(
+        'Recipe import is temporarily unavailable',
+        { cause: error },
+      );
+    }
   }
 
   findForProcessing(recipeId: number): Promise<Recipe | null> {

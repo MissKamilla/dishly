@@ -45,6 +45,15 @@ export class RecipesController {
     return this.recipeImportService.requestImport(user.id, dto.url);
   }
 
+  @Post(':id/retry')
+  @HttpCode(HttpStatus.ACCEPTED)
+  retryImport(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParsePositiveIntPipe) recipeId: number,
+  ): Promise<void> {
+    return this.recipeImportService.requestRetry(user.id, recipeId);
+  }
+
   @Get(':id')
   findOne(
     @CurrentUser() user: AuthenticatedUser,
