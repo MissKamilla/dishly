@@ -78,6 +78,18 @@ describe('RecipeImportProcessor', () => {
       42,
       parsedRecipe,
     );
+    expect(
+      recipeImportService.findForProcessing.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      recipeImportService.prepareForProcessing.mock.invocationCallOrder[0],
+    );
+    expect(
+      recipeImportService.prepareForProcessing.mock.invocationCallOrder[0],
+    ).toBeLessThan(recipeParserService.parse.mock.invocationCallOrder[0]);
+    expect(recipeParserService.parse.mock.invocationCallOrder[0]).toBeLessThan(
+      recipeImportService.completeImport.mock.invocationCallOrder[0],
+    );
+    expect(recipeImportService.failImport).not.toHaveBeenCalled();
     expect(logSpy).toHaveBeenCalledWith(
       'Processing recipe import job 1 for recipe 42, attempt 1/3',
     );
@@ -141,15 +153,19 @@ describe('RecipeImportProcessor', () => {
       RecipeParserErrorCode.RECIPE_NOT_FOUND,
       '<html>Private page</html> cookie=fake-session',
       null,
+      false,
     );
     recipeParserService.parse.mockRejectedValue(parserError);
-    const job = createJob(IMPORT_RECIPE_JOB, { recipeId: 42 });
+    const job = createAttemptJob(0);
 
-    await expect(processor.process(job)).rejects.toMatchObject({
-      constructor: UnrecoverableError,
-      message: RecipeParserErrorCode.RECIPE_NOT_FOUND,
-    });
+    const processing = processor.process(job);
+    await expect(processing).rejects.toBeInstanceOf(UnrecoverableError);
+    await expect(processing).rejects.toHaveProperty(
+      'message',
+      RecipeParserErrorCode.RECIPE_NOT_FOUND,
+    );
 
+    expect(recipeImportService.prepareForProcessing).toHaveBeenCalledWith(42);
     expect(recipeImportService.failImport).toHaveBeenCalledWith(
       42,
       RecipeParserErrorCode.RECIPE_NOT_FOUND,
@@ -304,6 +320,7 @@ describe('RecipeImportProcessor', () => {
       expect(recipeImportService.prepareForProcessing).not.toHaveBeenCalled();
       expect(recipeParserService.parse).not.toHaveBeenCalled();
       expect(recipeImportService.completeImport).not.toHaveBeenCalled();
+      expect(recipeImportService.failImport).not.toHaveBeenCalled();
     },
   );
 
@@ -321,6 +338,7 @@ describe('RecipeImportProcessor', () => {
     expect(recipeImportService.prepareForProcessing).not.toHaveBeenCalled();
     expect(recipeParserService.parse).not.toHaveBeenCalled();
     expect(recipeImportService.completeImport).not.toHaveBeenCalled();
+    expect(recipeImportService.failImport).not.toHaveBeenCalled();
   });
 
   it('throws for an unknown job instead of completing it', async () => {

@@ -98,6 +98,7 @@ describe('RecipeImportService', () => {
       }),
     );
     expect(recipeImportQueue.enqueue).toHaveBeenCalledWith(42);
+    expect(recipeImportQueue.enqueue).toHaveBeenCalledTimes(1);
     expect(recipesRepository.update).not.toHaveBeenCalled();
     expect(recipesRepository.save.mock.invocationCallOrder[0]).toBeLessThan(
       recipeImportQueue.enqueue.mock.invocationCallOrder[0],
@@ -119,12 +120,27 @@ describe('RecipeImportService', () => {
       cause: queueError,
     });
 
+    expect(recipesRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: RecipeStatus.PENDING,
+        userId: 7,
+      }),
+    );
+    expect(recipesRepository.save).toHaveBeenCalledTimes(1);
+    expect(recipeImportQueue.enqueue).toHaveBeenCalledWith(42);
     expect(recipesRepository.update).toHaveBeenCalledWith(
       { id: 42, status: RecipeStatus.PENDING },
       {
         status: RecipeStatus.FAILED,
         errorMessage: 'queue_unavailable',
       },
+    );
+    expect(recipesRepository.update).toHaveBeenCalledTimes(1);
+    expect(recipesRepository.save.mock.invocationCallOrder[0]).toBeLessThan(
+      recipeImportQueue.enqueue.mock.invocationCallOrder[0],
+    );
+    expect(recipeImportQueue.enqueue.mock.invocationCallOrder[0]).toBeLessThan(
+      recipesRepository.update.mock.invocationCallOrder[0],
     );
   });
 
@@ -248,18 +264,22 @@ describe('RecipeImportService', () => {
   });
 
   it.each([
+    'not-a-url',
     'https://example.com/recipes/example',
     'http://localhost/recipes/example',
-  ])('rejects unsupported URL %s before creating a recipe', async (url) => {
-    await expect(
-      recipeImportService.requestImport(7, url),
-    ).rejects.toBeInstanceOf(BadRequestException);
+  ])(
+    'rejects invalid or unsupported URL %s before creating a recipe',
+    async (url) => {
+      await expect(
+        recipeImportService.requestImport(7, url),
+      ).rejects.toBeInstanceOf(BadRequestException);
 
-    expect(recipesRepository.create).not.toHaveBeenCalled();
-    expect(recipesRepository.save).not.toHaveBeenCalled();
-    expect(recipesRepository.update).not.toHaveBeenCalled();
-    expect(recipeImportQueue.enqueue).not.toHaveBeenCalled();
-  });
+      expect(recipesRepository.create).not.toHaveBeenCalled();
+      expect(recipesRepository.save).not.toHaveBeenCalled();
+      expect(recipesRepository.update).not.toHaveBeenCalled();
+      expect(recipeImportQueue.enqueue).not.toHaveBeenCalled();
+    },
+  );
 
   it('loads a recipe for processing by its database id', async () => {
     const recipe = createSavedRecipe({} as Recipe);
@@ -321,6 +341,48 @@ describe('RecipeImportService', () => {
 
   it('atomically replaces children and completes the recipe', async () => {
     const parsedRecipe = createParsedRecipe();
+    parsedRecipe.steps.push({
+      text: 'Serve',
+      group: null,
+      durationMinutes: null,
+      imageUrl: 'https://example.com/serve.jpg',
+    });
+    const expectedIngredients = [
+      {
+        rawText: '200g pasta',
+        name: 'pasta',
+        quantity: 200,
+        unit: 'g',
+        recipeId: 42,
+        position: 1,
+      },
+      {
+        rawText: 'salt to taste',
+        name: 'salt',
+        quantity: null,
+        unit: null,
+        recipeId: 42,
+        position: 2,
+      },
+    ];
+    const expectedSteps = [
+      {
+        text: 'Boil pasta',
+        group: 'Pasta',
+        durationMinutes: 10,
+        imageUrl: null,
+        recipeId: 42,
+        position: 1,
+      },
+      {
+        text: 'Serve',
+        group: null,
+        durationMinutes: null,
+        imageUrl: 'https://example.com/serve.jpg',
+        recipeId: 42,
+        position: 2,
+      },
+    ];
     const transactionalRecipeRepository = {
       findOneBy: jest.fn().mockResolvedValue({
         id: 42,
@@ -355,34 +417,18 @@ describe('RecipeImportService', () => {
     expect(transactionalStepRepository.delete).toHaveBeenCalledWith({
       recipeId: 42,
     });
-    expect(transactionalIngredientRepository.create).toHaveBeenCalledWith([
-      {
-        rawText: '200g pasta',
-        name: 'pasta',
-        quantity: 200,
-        unit: 'g',
-        recipeId: 42,
-        position: 1,
-      },
-      {
-        rawText: 'salt to taste',
-        name: 'salt',
-        quantity: null,
-        unit: null,
-        recipeId: 42,
-        position: 2,
-      },
-    ]);
-    expect(transactionalStepRepository.create).toHaveBeenCalledWith([
-      {
-        text: 'Boil pasta',
-        group: 'Pasta',
-        durationMinutes: 10,
-        imageUrl: null,
-        recipeId: 42,
-        position: 1,
-      },
-    ]);
+    expect(transactionalIngredientRepository.create).toHaveBeenCalledWith(
+      expectedIngredients,
+    );
+    expect(transactionalIngredientRepository.save).toHaveBeenCalledWith(
+      expectedIngredients,
+    );
+    expect(transactionalStepRepository.create).toHaveBeenCalledWith(
+      expectedSteps,
+    );
+    expect(transactionalStepRepository.save).toHaveBeenCalledWith(
+      expectedSteps,
+    );
     expect(transactionalRecipeRepository.update).toHaveBeenCalledWith(
       { id: 42, status: RecipeStatus.PROCESSING },
       {
@@ -396,6 +442,13 @@ describe('RecipeImportService', () => {
         errorMessage: null,
       },
     );
+    expect(transactionalIngredientRepository.save).toHaveBeenCalledTimes(1);
+    expect(transactionalStepRepository.save).toHaveBeenCalledTimes(1);
+    expect(
+      transactionalIngredientRepository.save.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      transactionalStepRepository.save.mock.invocationCallOrder[0],
+    );
     expect(
       transactionalIngredientRepository.save.mock.invocationCallOrder[0],
     ).toBeLessThan(
@@ -406,6 +459,51 @@ describe('RecipeImportService', () => {
     ).toBeLessThan(
       transactionalRecipeRepository.update.mock.invocationCallOrder[0],
     );
+    expect(recipesRepository.update).not.toHaveBeenCalled();
+  });
+
+  it('uses one transactional manager when saving a child fails', async () => {
+    const saveError = new Error('Step save failed');
+    const transactionalRecipeRepository = {
+      findOneBy: jest.fn().mockResolvedValue({
+        id: 42,
+        status: RecipeStatus.PROCESSING,
+      }),
+      update: jest.fn(),
+    };
+    const transactionalIngredientRepository = createChildRepository();
+    const transactionalStepRepository = createChildRepository();
+    transactionalStepRepository.save.mockRejectedValue(saveError);
+    const manager = {
+      getRepository: jest.fn((entity: unknown) => {
+        if (entity === Recipe) return transactionalRecipeRepository;
+        if (entity === RecipeIngredient)
+          return transactionalIngredientRepository;
+        if (entity === RecipeStep) return transactionalStepRepository;
+        throw new Error('Unexpected entity');
+      }),
+    };
+    dataSource.transaction.mockImplementation(
+      (callback: (transactionManager: EntityManager) => Promise<boolean>) =>
+        callback(manager as unknown as EntityManager),
+    );
+
+    await expect(
+      recipeImportService.completeImport(42, createParsedRecipe()),
+    ).rejects.toBe(saveError);
+
+    expect(dataSource.transaction).toHaveBeenCalledTimes(1);
+    expect(manager.getRepository.mock.calls).toEqual([
+      [Recipe],
+      [RecipeIngredient],
+      [RecipeStep],
+    ]);
+    expect(transactionalIngredientRepository.delete).toHaveBeenCalledTimes(1);
+    expect(transactionalStepRepository.delete).toHaveBeenCalledTimes(1);
+    expect(transactionalIngredientRepository.save).toHaveBeenCalledTimes(1);
+    expect(transactionalStepRepository.save).toHaveBeenCalledTimes(1);
+    expect(transactionalRecipeRepository.update).not.toHaveBeenCalled();
+    expect(recipesRepository.save).not.toHaveBeenCalled();
     expect(recipesRepository.update).not.toHaveBeenCalled();
   });
 
