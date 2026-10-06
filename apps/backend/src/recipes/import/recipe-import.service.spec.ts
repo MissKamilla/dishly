@@ -23,10 +23,12 @@ import { RecipeImportQueue } from '../queue/recipe-import.queue';
 import { RecipeImportService } from './recipe-import.service';
 
 describe('RecipeImportService', () => {
+  const token = '8f753a75-d158-430b-8fac-310402539abe';
   let recipesRepository: {
     create: jest.Mock;
     save: jest.Mock;
     update: jest.Mock;
+    find: jest.Mock;
     findOneBy: jest.Mock;
   };
   let recipeImportQueue: {
@@ -44,6 +46,7 @@ describe('RecipeImportService', () => {
         Promise.resolve(createSavedRecipe(recipe)),
       ),
       update: jest.fn().mockResolvedValue({ affected: 1 }),
+      find: jest.fn().mockResolvedValue([]),
       findOneBy: jest.fn(),
     };
     recipeImportQueue = {
@@ -88,6 +91,8 @@ describe('RecipeImportService', () => {
       cookTimeMinutes: null,
       status: RecipeStatus.PENDING,
       errorMessage: null,
+      processingJobId: null,
+      processingToken: null,
       userId: 7,
     });
     expect(recipesRepository.save).toHaveBeenCalledWith(
@@ -129,7 +134,7 @@ describe('RecipeImportService', () => {
     expect(recipesRepository.save).toHaveBeenCalledTimes(1);
     expect(recipeImportQueue.enqueue).toHaveBeenCalledWith(42);
     expect(recipesRepository.update).toHaveBeenCalledWith(
-      { id: 42, status: RecipeStatus.PENDING },
+      { id: 42, userId: 7, status: RecipeStatus.PENDING },
       {
         status: RecipeStatus.FAILED,
         errorMessage: 'queue_unavailable',
@@ -158,7 +163,12 @@ describe('RecipeImportService', () => {
     });
     expect(recipesRepository.update).toHaveBeenCalledWith(
       { id: 42, userId: 7, status: RecipeStatus.FAILED },
-      { status: RecipeStatus.PENDING, errorMessage: null },
+      {
+        status: RecipeStatus.PENDING,
+        errorMessage: null,
+        processingJobId: null,
+        processingToken: null,
+      },
     );
     expect(recipeImportQueue.enqueue).not.toHaveBeenCalled();
   });
@@ -189,7 +199,12 @@ describe('RecipeImportService', () => {
 
     expect(recipesRepository.update).toHaveBeenCalledWith(
       { id: 42, userId: 7, status: RecipeStatus.FAILED },
-      { status: RecipeStatus.PENDING, errorMessage: null },
+      {
+        status: RecipeStatus.PENDING,
+        errorMessage: null,
+        processingJobId: null,
+        processingToken: null,
+      },
     );
     expect(recipesRepository.findOneBy).not.toHaveBeenCalled();
     expect(recipeImportQueue.enqueue).toHaveBeenCalledWith(42);
@@ -213,7 +228,12 @@ describe('RecipeImportService', () => {
     expect(recipesRepository.update).toHaveBeenNthCalledWith(
       1,
       { id: 42, userId: 7, status: RecipeStatus.FAILED },
-      { status: RecipeStatus.PENDING, errorMessage: null },
+      {
+        status: RecipeStatus.PENDING,
+        errorMessage: null,
+        processingJobId: null,
+        processingToken: null,
+      },
     );
     expect(recipesRepository.update).toHaveBeenNthCalledWith(
       2,
@@ -291,26 +311,85 @@ describe('RecipeImportService', () => {
     expect(recipesRepository.findOneBy).toHaveBeenCalledWith({ id: 42 });
   });
 
-  it('transitions a processable recipe to processing and clears its error', async () => {
-    await expect(recipeImportService.prepareForProcessing(42)).resolves.toBe(
-      true,
-    );
+  it('claims only a pending recipe for processing and clears its error', async () => {
+    await expect(
+      recipeImportService.prepareForProcessing(42, 'job-42', token),
+    ).resolves.toBe(true);
 
     const calls = recipesRepository.update.mock.calls as unknown[][];
     const [criteria, update] = calls[0] as [
-      { id: number; status: FindOperator<RecipeStatus> },
+      { id: number; status: RecipeStatus },
       Partial<Recipe>,
     ];
 
     expect(criteria.id).toBe(42);
-    expect(criteria.status.value).toEqual([
-      RecipeStatus.PENDING,
-      RecipeStatus.PROCESSING,
-    ]);
+    expect(criteria.status).toBe(RecipeStatus.PENDING);
     expect(update).toEqual({
       status: RecipeStatus.PROCESSING,
       errorMessage: null,
+      processingJobId: 'job-42',
+      processingToken: token,
     });
+
+    recipesRepository.update.mockResolvedValue({ affected: 0 });
+    await expect(
+      recipeImportService.prepareForProcessing(42, 'job-42', token),
+    ).resolves.toBe(false);
+  });
+
+  it('returns a failed attempt to pending before BullMQ retries it', async () => {
+    await recipeImportService.releaseForRetry(42, token);
+
+    expect(recipesRepository.update).toHaveBeenCalledWith(
+      { id: 42, status: RecipeStatus.PROCESSING, processingToken: token },
+      {
+        status: RecipeStatus.PENDING,
+        processingJobId: null,
+        processingToken: null,
+      },
+    );
+  });
+
+  it('reclaims a processing recipe only for the same BullMQ job', async () => {
+    recipesRepository.update
+      .mockResolvedValueOnce({ affected: 0 })
+      .mockResolvedValueOnce({ affected: 1 });
+
+    await expect(
+      recipeImportService.prepareForProcessing(42, 'job-42', token),
+    ).resolves.toBe(true);
+
+    expect(recipesRepository.update).toHaveBeenNthCalledWith(
+      2,
+      {
+        id: 42,
+        status: RecipeStatus.PROCESSING,
+        processingJobId: 'job-42',
+      },
+      {
+        status: RecipeStatus.PROCESSING,
+        errorMessage: null,
+        processingJobId: 'job-42',
+        processingToken: token,
+      },
+    );
+  });
+
+  it('fences status changes from an earlier execution', async () => {
+    recipesRepository.update.mockResolvedValue({ affected: 0 });
+
+    await recipeImportService.releaseForRetry(42, token);
+    await recipeImportService.failImport(
+      42,
+      token,
+      RecipeParserErrorCode.FETCH_FAILED,
+    );
+
+    for (const [criteria] of recipesRepository.update.mock.calls as [
+      { processingToken: string },
+    ][]) {
+      expect(criteria.processingToken).toBe(token);
+    }
   });
 
   it.each([
@@ -319,25 +398,141 @@ describe('RecipeImportService', () => {
   ])(
     'stores safe error code %s for a processable recipe',
     async (errorCode) => {
-      await recipeImportService.failImport(42, errorCode);
+      await recipeImportService.failImport(42, token, errorCode);
 
       const calls = recipesRepository.update.mock.calls as unknown[][];
       const [criteria, update] = calls[0] as [
-        { id: number; status: FindOperator<RecipeStatus> },
+        { id: number; status: RecipeStatus; processingToken: string },
         Partial<Recipe>,
       ];
 
       expect(criteria.id).toBe(42);
-      expect(criteria.status.value).toEqual([
-        RecipeStatus.PENDING,
-        RecipeStatus.PROCESSING,
-      ]);
+      expect(criteria.status).toBe(RecipeStatus.PROCESSING);
+      expect(criteria.processingToken).toBe(token);
       expect(update).toEqual({
         status: RecipeStatus.FAILED,
         errorMessage: errorCode,
+        processingJobId: null,
+        processingToken: null,
       });
     },
   );
+
+  it('finds only processing recipes older than the recovery cutoff', async () => {
+    const cutoff = new Date('2026-10-06T12:00:00.000Z');
+
+    await recipeImportService.findStaleProcessing(cutoff, 40, 100);
+
+    const calls = recipesRepository.find.mock.calls as unknown[][];
+    const options = calls[0]?.[0] as {
+      select: Record<string, boolean>;
+      where: {
+        id: FindOperator<number>;
+        status: RecipeStatus;
+        updatedAt: FindOperator<Date>;
+      };
+      order: { id: string };
+      take: number;
+    };
+    expect(options.select).toEqual({
+      id: true,
+      updatedAt: true,
+      processingJobId: true,
+    });
+    expect(options.where.status).toBe(RecipeStatus.PROCESSING);
+    expect(options.where.updatedAt.value).toEqual(cutoff);
+    expect(options.where.id.value).toBe(40);
+    expect(options.order).toEqual({ id: 'ASC' });
+    expect(options.take).toBe(100);
+  });
+
+  it('finds only pending recipes older than the recovery cutoff', async () => {
+    const cutoff = new Date('2026-10-06T12:00:00.000Z');
+
+    await recipeImportService.findStalePending(cutoff, 40, 100);
+
+    const calls = recipesRepository.find.mock.calls as unknown[][];
+    const options = calls[0]?.[0] as {
+      select: Record<string, boolean>;
+      where: {
+        id: FindOperator<number>;
+        status: RecipeStatus;
+        updatedAt: FindOperator<Date>;
+      };
+      order: { id: string };
+      take: number;
+    };
+    expect(options.select).toEqual({ id: true });
+    expect(options.where.status).toBe(RecipeStatus.PENDING);
+    expect(options.where.updatedAt.value).toEqual(cutoff);
+    expect(options.where.id.value).toBe(40);
+    expect(options.order).toEqual({ id: 'ASC' });
+    expect(options.take).toBe(100);
+  });
+
+  it('changes only a still-stale pending recipe to failed', async () => {
+    const cutoff = new Date('2026-10-06T12:00:00.000Z');
+
+    await expect(
+      recipeImportService.failStalePending(42, cutoff),
+    ).resolves.toBe(true);
+
+    const calls = recipesRepository.update.mock.calls as unknown[][];
+    const [criteria, update] = calls[0] as [
+      {
+        id: number;
+        status: RecipeStatus;
+        updatedAt: FindOperator<Date>;
+      },
+      Partial<Recipe>,
+    ];
+    expect(criteria.id).toBe(42);
+    expect(criteria.status).toBe(RecipeStatus.PENDING);
+    expect(criteria.updatedAt.value).toEqual(cutoff);
+    expect(update).toEqual({
+      status: RecipeStatus.FAILED,
+      errorMessage: 'queue_unavailable',
+      processingJobId: null,
+      processingToken: null,
+    });
+
+    recipesRepository.update.mockResolvedValue({ affected: 0 });
+    await expect(
+      recipeImportService.failStalePending(42, cutoff),
+    ).resolves.toBe(false);
+  });
+
+  it('changes only a still-stale processing recipe to failed', async () => {
+    const cutoff = new Date('2026-10-06T12:00:00.000Z');
+
+    await expect(
+      recipeImportService.failStaleProcessing(42, cutoff),
+    ).resolves.toBe(true);
+
+    const calls = recipesRepository.update.mock.calls as unknown[][];
+    const [criteria, update] = calls[0] as [
+      {
+        id: number;
+        status: RecipeStatus;
+        updatedAt: FindOperator<Date>;
+      },
+      Partial<Recipe>,
+    ];
+    expect(criteria.id).toBe(42);
+    expect(criteria.status).toBe(RecipeStatus.PROCESSING);
+    expect(criteria.updatedAt.value).toEqual(cutoff);
+    expect(update).toEqual({
+      status: RecipeStatus.FAILED,
+      errorMessage: 'unexpected_import_error',
+      processingJobId: null,
+      processingToken: null,
+    });
+
+    recipesRepository.update.mockResolvedValue({ affected: 0 });
+    await expect(
+      recipeImportService.failStaleProcessing(42, cutoff),
+    ).resolves.toBe(false);
+  });
 
   it('atomically replaces children and completes the recipe', async () => {
     const parsedRecipe = createParsedRecipe();
@@ -384,7 +579,7 @@ describe('RecipeImportService', () => {
       },
     ];
     const transactionalRecipeRepository = {
-      findOneBy: jest.fn().mockResolvedValue({
+      findOne: jest.fn().mockResolvedValue({
         id: 42,
         status: RecipeStatus.PROCESSING,
       }),
@@ -407,7 +602,7 @@ describe('RecipeImportService', () => {
     );
 
     await expect(
-      recipeImportService.completeImport(42, parsedRecipe),
+      recipeImportService.completeImport(42, token, parsedRecipe),
     ).resolves.toBe(true);
 
     expect(dataSource.transaction).toHaveBeenCalledTimes(1);
@@ -430,7 +625,7 @@ describe('RecipeImportService', () => {
       expectedSteps,
     );
     expect(transactionalRecipeRepository.update).toHaveBeenCalledWith(
-      { id: 42, status: RecipeStatus.PROCESSING },
+      { id: 42, status: RecipeStatus.PROCESSING, processingToken: token },
       {
         title: 'Pasta',
         description: 'Simple pasta',
@@ -440,6 +635,8 @@ describe('RecipeImportService', () => {
         cookTimeMinutes: 20,
         status: RecipeStatus.COMPLETED,
         errorMessage: null,
+        processingJobId: null,
+        processingToken: null,
       },
     );
     expect(transactionalIngredientRepository.save).toHaveBeenCalledTimes(1);
@@ -465,7 +662,7 @@ describe('RecipeImportService', () => {
   it('uses one transactional manager when saving a child fails', async () => {
     const saveError = new Error('Step save failed');
     const transactionalRecipeRepository = {
-      findOneBy: jest.fn().mockResolvedValue({
+      findOne: jest.fn().mockResolvedValue({
         id: 42,
         status: RecipeStatus.PROCESSING,
       }),
@@ -489,7 +686,7 @@ describe('RecipeImportService', () => {
     );
 
     await expect(
-      recipeImportService.completeImport(42, createParsedRecipe()),
+      recipeImportService.completeImport(42, token, createParsedRecipe()),
     ).rejects.toBe(saveError);
 
     expect(dataSource.transaction).toHaveBeenCalledTimes(1);
@@ -509,7 +706,7 @@ describe('RecipeImportService', () => {
 
   it('does not recreate a recipe deleted before persistence', async () => {
     const transactionalRecipeRepository = {
-      findOneBy: jest.fn().mockResolvedValue(null),
+      findOne: jest.fn().mockResolvedValue(null),
       update: jest.fn(),
     };
     const transactionalIngredientRepository = createChildRepository();
@@ -529,12 +726,16 @@ describe('RecipeImportService', () => {
     );
 
     await expect(
-      recipeImportService.completeImport(42, createParsedRecipe()),
+      recipeImportService.completeImport(42, token, createParsedRecipe()),
     ).resolves.toBe(false);
 
-    expect(transactionalRecipeRepository.findOneBy).toHaveBeenCalledWith({
-      id: 42,
-      status: RecipeStatus.PROCESSING,
+    expect(transactionalRecipeRepository.findOne).toHaveBeenCalledWith({
+      where: {
+        id: 42,
+        status: RecipeStatus.PROCESSING,
+        processingToken: token,
+      },
+      lock: { mode: 'pessimistic_write' },
     });
     expect(transactionalRecipeRepository.update).not.toHaveBeenCalled();
     expect(transactionalIngredientRepository.delete).not.toHaveBeenCalled();

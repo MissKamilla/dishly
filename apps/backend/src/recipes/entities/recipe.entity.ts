@@ -52,6 +52,17 @@ export class Recipe {
   @Column({ name: 'error_message', type: 'text', nullable: true })
   errorMessage!: string | null;
 
+  @Column({
+    name: 'processing_job_id',
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+  })
+  processingJobId!: string | null;
+
+  @Column({ name: 'processing_token', type: 'uuid', nullable: true })
+  processingToken!: string | null;
+
   @Column({ name: 'user_id', type: 'integer' })
   userId!: number;
 

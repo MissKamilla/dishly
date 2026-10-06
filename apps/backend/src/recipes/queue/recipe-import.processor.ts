@@ -1,11 +1,11 @@
 import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job, UnrecoverableError } from 'bullmq';
+import { randomUUID } from 'node:crypto';
 import { RecipeStatus } from '../enums/recipe-status.enum';
 import { RecipeImportService } from '../import/recipe-import.service';
 import { RecipeParserError } from '../parser/recipe-parser.error';
 import { RecipeParserService } from '../parser/recipe-parser.service';
-import { ParsedRecipe } from '../parser/types/parsed-recipe';
 import {
   IMPORT_RECIPE_JOB,
   ImportRecipeJobData,
@@ -32,93 +32,112 @@ export class RecipeImportProcessor extends WorkerHost {
       throw new Error('Invalid recipe import job payload');
     }
 
+    if (!job.id) {
+      throw new Error('Recipe import job is missing its id');
+    }
+
     const recipeId = job.data.recipeId;
+    const token = randomUUID();
     this.logger.log(
-      `Processing recipe import job ${job.id ?? 'unknown'} for recipe ${recipeId}, attempt ${(job.attemptsMade ?? 0) + 1}/${job.opts?.attempts ?? 1}`,
+      `Processing recipe import job ${job.id} for recipe ${recipeId}, attempt ${(job.attemptsMade ?? 0) + 1}/${job.opts?.attempts ?? 1}`,
     );
 
-    try {
-      await this.importRecipe(job, recipeId);
-    } catch (error) {
-      return this.handleImportFailure(job, recipeId, error);
-    }
+    await this.importRecipe(job, recipeId, job.id, token);
   }
 
   private async importRecipe(
     job: Job<unknown>,
     recipeId: number,
+    jobId: string,
+    token: string,
   ): Promise<void> {
     const recipe = await this.recipeImportService.findForProcessing(recipeId);
 
     if (!recipe) {
       this.logger.warn(
-        `Recipe import job ${job.id ?? 'unknown'} skipped because recipe ${recipeId} no longer exists`,
+        `Recipe import job ${jobId} skipped because recipe ${recipeId} no longer exists`,
       );
       return;
     }
 
     if (!isProcessableStatus(recipe.status)) {
       this.logger.warn(
-        `Recipe import job ${job.id ?? 'unknown'} skipped because recipe ${recipe.id} has status ${recipe.status}`,
+        `Recipe import job ${jobId} skipped because recipe ${recipe.id} has status ${recipe.status}`,
       );
       return;
     }
 
     const prepared = await this.recipeImportService.prepareForProcessing(
       recipe.id,
+      jobId,
+      token,
     );
 
     if (!prepared) {
       this.logger.warn(
-        `Recipe import job ${job.id ?? 'unknown'} skipped because recipe ${recipe.id} could not transition to processing`,
+        `Recipe import job ${jobId} skipped because recipe ${recipe.id} could not transition to processing`,
       );
       return;
     }
 
-    const parsedRecipe: ParsedRecipe = await this.recipeParserService.parse(
-      recipe.sourceUrl,
-    );
-
-    const completed = await this.recipeImportService.completeImport(
-      recipe.id,
-      parsedRecipe,
-    );
-
-    if (!completed) {
-      this.logger.warn(
-        `Recipe import job ${job.id ?? 'unknown'} skipped because recipe ${recipe.id} is no longer processing`,
+    try {
+      const parsedRecipe = await this.recipeParserService.parse(
+        recipe.sourceUrl,
       );
+
+      const completed = await this.recipeImportService.completeImport(
+        recipe.id,
+        token,
+        parsedRecipe,
+      );
+
+      if (!completed) {
+        this.logger.warn(
+          `Recipe import job ${jobId} skipped because recipe ${recipe.id} is no longer processing`,
+        );
+      }
+    } catch (error) {
+      return this.handleImportFailure(job, recipeId, token, error);
     }
   }
 
   private async handleImportFailure(
     job: Job<unknown>,
     recipeId: number,
+    token: string,
     error: unknown,
   ): Promise<never> {
-    if (error instanceof RecipeParserError && !error.retryable) {
-      await this.recipeImportService.failImport(recipeId, error.code);
-      throw new UnrecoverableError(error.code);
+    const permanentParserError =
+      error instanceof RecipeParserError && !error.retryable;
+    const importError =
+      error instanceof Error
+        ? error
+        : new Error('Unexpected recipe import failure', { cause: error });
+
+    if (!permanentParserError && !isFinalAttempt(job)) {
+      await this.recipeImportService.releaseForRetry(recipeId, token);
+      throw importError;
     }
 
-    if (isFinalAttempt(job)) {
-      const errorCode =
-        error instanceof RecipeParserError
-          ? error.code
-          : 'unexpected_import_error';
-
-      try {
-        await this.recipeImportService.failImport(recipeId, errorCode);
-      } catch {
-        this.logger.error(
-          `Recipe import job ${job.id ?? 'unknown'} for recipe ${recipeId}: status_update_failed`,
-        );
+    const errorCode =
+      error instanceof RecipeParserError
+        ? error.code
+        : 'unexpected_import_error';
+    try {
+      await this.recipeImportService.failImport(recipeId, token, errorCode);
+    } catch (statusError) {
+      if (permanentParserError) {
+        throw statusError;
       }
+      this.logger.error(
+        `Recipe import job ${job.id ?? 'unknown'} for recipe ${recipeId}: status_update_failed`,
+      );
     }
 
-    throw error instanceof Error
-      ? error
-      : new Error('Unexpected recipe import failure', { cause: error });
+    if (permanentParserError) {
+      throw new UnrecoverableError(errorCode);
+    }
+    throw importError;
   }
 
   @OnWorkerEvent('completed')

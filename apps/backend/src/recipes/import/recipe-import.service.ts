@@ -6,7 +6,13 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, In, Repository } from 'typeorm';
+import {
+  DataSource,
+  EntityManager,
+  LessThanOrEqual,
+  MoreThan,
+  Repository,
+} from 'typeorm';
 import { RecipeIngredient } from '../entities/recipe-ingredient.entity';
 import { RecipeStep } from '../entities/recipe-step.entity';
 import { Recipe } from '../entities/recipe.entity';
@@ -19,6 +25,10 @@ import { toRecipeListItemResponse } from '../recipes.mapper';
 import { RecipeListItemResponse } from '../types/recipe-response.types';
 
 const QUEUE_UNAVAILABLE_ERROR = 'queue_unavailable';
+const NO_PROCESSING_CLAIM = {
+  processingJobId: null,
+  processingToken: null,
+};
 
 @Injectable()
 export class RecipeImportService {
@@ -44,26 +54,12 @@ export class RecipeImportService {
       cookTimeMinutes: null,
       status: RecipeStatus.PENDING,
       errorMessage: null,
+      ...NO_PROCESSING_CLAIM,
       userId,
     });
     const savedRecipe = await this.recipesRepository.save(recipe);
 
-    try {
-      await this.recipeImportQueue.enqueue(savedRecipe.id);
-    } catch (error) {
-      await this.recipesRepository.update(
-        { id: savedRecipe.id, status: RecipeStatus.PENDING },
-        {
-          status: RecipeStatus.FAILED,
-          errorMessage: QUEUE_UNAVAILABLE_ERROR,
-        },
-      );
-
-      throw new ServiceUnavailableException(
-        'Recipe import is temporarily unavailable',
-        { cause: error },
-      );
-    }
+    await this.enqueueOrFail(savedRecipe.id, userId);
 
     return toRecipeListItemResponse(savedRecipe);
   }
@@ -71,7 +67,11 @@ export class RecipeImportService {
   async requestRetry(userId: number, recipeId: number): Promise<void> {
     const result = await this.recipesRepository.update(
       { id: recipeId, userId, status: RecipeStatus.FAILED },
-      { status: RecipeStatus.PENDING, errorMessage: null },
+      {
+        status: RecipeStatus.PENDING,
+        errorMessage: null,
+        ...NO_PROCESSING_CLAIM,
+      },
     );
 
     if (result.affected !== 1) {
@@ -87,17 +87,17 @@ export class RecipeImportService {
       throw new ConflictException('Only failed recipes can be retried');
     }
 
+    await this.enqueueOrFail(recipeId, userId);
+  }
+
+  private async enqueueOrFail(recipeId: number, userId: number): Promise<void> {
     try {
       await this.recipeImportQueue.enqueue(recipeId);
     } catch (error) {
       await this.recipesRepository.update(
         { id: recipeId, userId, status: RecipeStatus.PENDING },
-        {
-          status: RecipeStatus.FAILED,
-          errorMessage: QUEUE_UNAVAILABLE_ERROR,
-        },
+        { status: RecipeStatus.FAILED, errorMessage: QUEUE_UNAVAILABLE_ERROR },
       );
-
       throw new ServiceUnavailableException(
         'Recipe import is temporarily unavailable',
         { cause: error },
@@ -109,54 +109,161 @@ export class RecipeImportService {
     return this.recipesRepository.findOneBy({ id: recipeId });
   }
 
-  async prepareForProcessing(recipeId: number): Promise<boolean> {
+  async prepareForProcessing(
+    recipeId: number,
+    jobId: string,
+    token: string,
+  ): Promise<boolean> {
+    const claim = {
+      status: RecipeStatus.PROCESSING,
+      errorMessage: null,
+      processingJobId: jobId,
+      processingToken: token,
+    };
     const result = await this.recipesRepository.update(
       {
         id: recipeId,
-        status: In([RecipeStatus.PENDING, RecipeStatus.PROCESSING]),
+        status: RecipeStatus.PENDING,
+      },
+      claim,
+    );
+
+    if (result.affected === 1) {
+      return true;
+    }
+
+    // BullMQ may reactivate the same job after its worker loses the lock.
+    // A new token fences off writes from the previous execution.
+    const reclaimed = await this.recipesRepository.update(
+      { id: recipeId, status: RecipeStatus.PROCESSING, processingJobId: jobId },
+      claim,
+    );
+    return reclaimed.affected === 1;
+  }
+
+  async releaseForRetry(recipeId: number, token: string): Promise<void> {
+    await this.recipesRepository.update(
+      { id: recipeId, status: RecipeStatus.PROCESSING, processingToken: token },
+      {
+        status: RecipeStatus.PENDING,
+        ...NO_PROCESSING_CLAIM,
+      },
+    );
+  }
+
+  async failImport(
+    recipeId: number,
+    token: string,
+    errorCode: RecipeParserErrorCode | 'unexpected_import_error',
+  ): Promise<void> {
+    await this.recipesRepository.update(
+      {
+        id: recipeId,
+        status: RecipeStatus.PROCESSING,
+        processingToken: token,
       },
       {
+        status: RecipeStatus.FAILED,
+        errorMessage: errorCode,
+        ...NO_PROCESSING_CLAIM,
+      },
+    );
+  }
+
+  findStaleProcessing(
+    before: Date,
+    afterId: number,
+    limit: number,
+  ): Promise<Recipe[]> {
+    return this.recipesRepository.find({
+      select: { id: true, updatedAt: true, processingJobId: true },
+      where: {
+        id: MoreThan(afterId),
         status: RecipeStatus.PROCESSING,
-        errorMessage: null,
+        updatedAt: LessThanOrEqual(before),
+      },
+      order: { id: 'ASC' },
+      take: limit,
+    });
+  }
+
+  findStalePending(
+    before: Date,
+    afterId: number,
+    limit: number,
+  ): Promise<Recipe[]> {
+    return this.recipesRepository.find({
+      select: { id: true },
+      where: {
+        id: MoreThan(afterId),
+        status: RecipeStatus.PENDING,
+        updatedAt: LessThanOrEqual(before),
+      },
+      order: { id: 'ASC' },
+      take: limit,
+    });
+  }
+
+  async failStalePending(recipeId: number, before: Date): Promise<boolean> {
+    const result = await this.recipesRepository.update(
+      {
+        id: recipeId,
+        status: RecipeStatus.PENDING,
+        updatedAt: LessThanOrEqual(before),
+      },
+      {
+        status: RecipeStatus.FAILED,
+        errorMessage: QUEUE_UNAVAILABLE_ERROR,
+        ...NO_PROCESSING_CLAIM,
       },
     );
 
     return result.affected === 1;
   }
 
-  async failImport(
-    recipeId: number,
-    errorCode: RecipeParserErrorCode | 'unexpected_import_error',
-  ): Promise<void> {
-    await this.recipesRepository.update(
+  async failStaleProcessing(recipeId: number, before: Date): Promise<boolean> {
+    const result = await this.recipesRepository.update(
       {
         id: recipeId,
-        status: In([RecipeStatus.PENDING, RecipeStatus.PROCESSING]),
+        status: RecipeStatus.PROCESSING,
+        updatedAt: LessThanOrEqual(before),
       },
-      { status: RecipeStatus.FAILED, errorMessage: errorCode },
+      {
+        status: RecipeStatus.FAILED,
+        errorMessage: 'unexpected_import_error',
+        ...NO_PROCESSING_CLAIM,
+      },
     );
+
+    return result.affected === 1;
   }
 
   completeImport(
     recipeId: number,
+    token: string,
     parsedRecipe: ParsedRecipe,
   ): Promise<boolean> {
     return this.dataSource.transaction((manager) =>
-      this.saveParsedRecipe(manager, recipeId, parsedRecipe),
+      this.saveParsedRecipe(manager, recipeId, token, parsedRecipe),
     );
   }
 
   private async saveParsedRecipe(
     manager: EntityManager,
     recipeId: number,
+    token: string,
     parsedRecipe: ParsedRecipe,
   ): Promise<boolean> {
     const recipeRepository = manager.getRepository(Recipe);
     const ingredientRepository = manager.getRepository(RecipeIngredient);
     const stepRepository = manager.getRepository(RecipeStep);
-    const recipe = await recipeRepository.findOneBy({
-      id: recipeId,
-      status: RecipeStatus.PROCESSING,
+    const recipe = await recipeRepository.findOne({
+      where: {
+        id: recipeId,
+        status: RecipeStatus.PROCESSING,
+        processingToken: token,
+      },
+      lock: { mode: 'pessimistic_write' },
     });
 
     if (!recipe) {
@@ -185,7 +292,7 @@ export class RecipeImportService {
     await stepRepository.save(steps);
 
     const result = await recipeRepository.update(
-      { id: recipeId, status: RecipeStatus.PROCESSING },
+      { id: recipeId, status: RecipeStatus.PROCESSING, processingToken: token },
       {
         title: parsedRecipe.title,
         description: parsedRecipe.description,
@@ -195,6 +302,7 @@ export class RecipeImportService {
         cookTimeMinutes: parsedRecipe.cookTimeMinutes,
         status: RecipeStatus.COMPLETED,
         errorMessage: null,
+        ...NO_PROCESSING_CLAIM,
       },
     );
 

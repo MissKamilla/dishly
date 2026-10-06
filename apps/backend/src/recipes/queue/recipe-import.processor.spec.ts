@@ -26,6 +26,7 @@ describe('RecipeImportProcessor', () => {
   let recipeImportService: {
     findForProcessing: jest.Mock;
     prepareForProcessing: jest.Mock;
+    releaseForRetry: jest.Mock;
     failImport: jest.Mock;
     completeImport: jest.Mock;
   };
@@ -46,6 +47,7 @@ describe('RecipeImportProcessor', () => {
         sourceUrl: 'https://www.bbcgoodfood.com/recipes/example',
       }),
       prepareForProcessing: jest.fn().mockResolvedValue(true),
+      releaseForRetry: jest.fn().mockResolvedValue(undefined),
       failImport: jest.fn().mockResolvedValue(undefined),
       completeImport: jest.fn().mockResolvedValue(true),
     };
@@ -70,12 +72,17 @@ describe('RecipeImportProcessor', () => {
 
     await expect(processor.process(job)).resolves.toBeUndefined();
     expect(recipeImportService.findForProcessing).toHaveBeenCalledWith(42);
-    expect(recipeImportService.prepareForProcessing).toHaveBeenCalledWith(42);
+    expect(recipeImportService.prepareForProcessing).toHaveBeenCalledWith(
+      42,
+      '1',
+      expect.any(String),
+    );
     expect(recipeParserService.parse).toHaveBeenCalledWith(
       'https://www.bbcgoodfood.com/recipes/example',
     );
     expect(recipeImportService.completeImport).toHaveBeenCalledWith(
       42,
+      expect.any(String),
       parsedRecipe,
     );
     expect(
@@ -106,6 +113,7 @@ describe('RecipeImportProcessor', () => {
     expect(recipeParserService.parse).toHaveBeenCalledTimes(1);
     expect(recipeImportService.completeImport).toHaveBeenCalledWith(
       42,
+      expect.any(String),
       parsedRecipe,
     );
     expect(warnSpy).toHaveBeenCalledWith(
@@ -114,24 +122,53 @@ describe('RecipeImportProcessor', () => {
     expect(recipeImportService.failImport).not.toHaveBeenCalled();
   });
 
-  it('continues processing a recipe that is already processing', async () => {
+  it('skips another job while the recipe is already processing', async () => {
     recipeImportService.findForProcessing.mockResolvedValue({
       id: 42,
       status: RecipeStatus.PROCESSING,
       sourceUrl: 'https://www.bbcgoodfood.com/recipes/example',
     });
+    recipeImportService.prepareForProcessing.mockResolvedValue(false);
     const job = createJob(IMPORT_RECIPE_JOB, { recipeId: 42 });
 
     await expect(processor.process(job)).resolves.toBeUndefined();
 
-    expect(warnSpy).not.toHaveBeenCalled();
-    expect(recipeImportService.prepareForProcessing).toHaveBeenCalledWith(42);
-    expect(recipeParserService.parse).toHaveBeenCalledWith(
-      'https://www.bbcgoodfood.com/recipes/example',
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('could not transition to processing'),
     );
+    expect(recipeImportService.prepareForProcessing).toHaveBeenCalledWith(
+      42,
+      '1',
+      expect.any(String),
+    );
+    expect(recipeParserService.parse).not.toHaveBeenCalled();
+    expect(recipeImportService.completeImport).not.toHaveBeenCalled();
+  });
+
+  it('resumes a processing recipe when BullMQ restarts the same job', async () => {
+    recipeImportService.findForProcessing.mockResolvedValue({
+      id: 42,
+      status: RecipeStatus.PROCESSING,
+      sourceUrl: 'https://www.bbcgoodfood.com/recipes/example',
+    });
+
+    await expect(
+      processor.process(createAttemptJob(0)),
+    ).resolves.toBeUndefined();
+
+    expect(recipeImportService.prepareForProcessing).toHaveBeenCalledWith(
+      42,
+      '1',
+      expect.any(String),
+    );
+    expect(recipeParserService.parse).toHaveBeenCalledTimes(1);
+    const calls = recipeImportService.prepareForProcessing.mock
+      .calls as unknown as Array<[number, string, string]>;
+    const token = calls[0][2];
     expect(recipeImportService.completeImport).toHaveBeenCalledWith(
       42,
-      expect.any(Object),
+      token,
+      parsedRecipe,
     );
   });
 
@@ -165,9 +202,14 @@ describe('RecipeImportProcessor', () => {
       RecipeParserErrorCode.RECIPE_NOT_FOUND,
     );
 
-    expect(recipeImportService.prepareForProcessing).toHaveBeenCalledWith(42);
+    expect(recipeImportService.prepareForProcessing).toHaveBeenCalledWith(
+      42,
+      '1',
+      expect.any(String),
+    );
     expect(recipeImportService.failImport).toHaveBeenCalledWith(
       42,
+      expect.any(String),
       RecipeParserErrorCode.RECIPE_NOT_FOUND,
     );
     expect(recipeImportService.failImport).toHaveBeenCalledTimes(1);
@@ -175,7 +217,7 @@ describe('RecipeImportProcessor', () => {
   });
 
   it.each([0, 1])(
-    'keeps the recipe processing after retryable failure %i of 3',
+    'returns the recipe to pending after retryable failure %i of 3',
     async (attemptsMade) => {
       const parserError = new RecipeParserError(
         RecipeParserErrorCode.FETCH_FAILED,
@@ -193,7 +235,15 @@ describe('RecipeImportProcessor', () => {
 
       await expect(processor.process(job)).rejects.toBe(parserError);
 
-      expect(recipeImportService.prepareForProcessing).toHaveBeenCalledWith(42);
+      expect(recipeImportService.prepareForProcessing).toHaveBeenCalledWith(
+        42,
+        '1',
+        expect.any(String),
+      );
+      expect(recipeImportService.releaseForRetry).toHaveBeenCalledWith(
+        42,
+        expect.any(String),
+      );
       expect(recipeImportService.failImport).not.toHaveBeenCalled();
       expect(recipeImportService.completeImport).not.toHaveBeenCalled();
     },
@@ -218,9 +268,11 @@ describe('RecipeImportProcessor', () => {
 
     expect(recipeImportService.failImport).toHaveBeenCalledWith(
       42,
+      expect.any(String),
       RecipeParserErrorCode.FETCH_FAILED,
     );
     expect(recipeImportService.failImport).toHaveBeenCalledTimes(1);
+    expect(recipeImportService.releaseForRetry).not.toHaveBeenCalled();
     expect(recipeImportService.completeImport).not.toHaveBeenCalled();
   });
 
@@ -231,6 +283,10 @@ describe('RecipeImportProcessor', () => {
     await expect(processor.process(createAttemptJob(1))).rejects.toBe(error);
 
     expect(recipeImportService.failImport).not.toHaveBeenCalled();
+    expect(recipeImportService.releaseForRetry).toHaveBeenCalledWith(
+      42,
+      expect.any(String),
+    );
   });
 
   it('marks an unexpected parser error failed after the last attempt', async () => {
@@ -241,6 +297,7 @@ describe('RecipeImportProcessor', () => {
 
     expect(recipeImportService.failImport).toHaveBeenCalledWith(
       42,
+      expect.any(String),
       'unexpected_import_error',
     );
     expect(recipeImportService.failImport).toHaveBeenCalledTimes(1);
@@ -255,6 +312,10 @@ describe('RecipeImportProcessor', () => {
     });
 
     expect(recipeImportService.failImport).not.toHaveBeenCalled();
+    expect(recipeImportService.releaseForRetry).toHaveBeenCalledWith(
+      42,
+      expect.any(String),
+    );
   });
 
   it('marks a failed database save after the last attempt', async () => {
@@ -265,27 +326,21 @@ describe('RecipeImportProcessor', () => {
 
     expect(recipeImportService.failImport).toHaveBeenCalledWith(
       42,
+      expect.any(String),
       'unexpected_import_error',
     );
   });
 
-  it('keeps the original error if updating the failed status also fails', async () => {
+  it('does not change status when loading the recipe fails', async () => {
     const originalError = new Error('Database read failed');
-    const statusError = new Error('Database update failed');
     recipeImportService.findForProcessing.mockRejectedValue(originalError);
-    recipeImportService.failImport.mockRejectedValue(statusError);
 
     await expect(processor.process(createAttemptJob(2))).rejects.toBe(
       originalError,
     );
 
-    expect(recipeImportService.failImport).toHaveBeenCalledWith(
-      42,
-      'unexpected_import_error',
-    );
-    expect(errorSpy).toHaveBeenCalledWith(
-      'Recipe import job 1 for recipe 42: status_update_failed',
-    );
+    expect(recipeImportService.failImport).not.toHaveBeenCalled();
+    expect(recipeImportService.releaseForRetry).not.toHaveBeenCalled();
   });
 
   it('lets BullMQ retry if a permanent error cannot be saved', async () => {
