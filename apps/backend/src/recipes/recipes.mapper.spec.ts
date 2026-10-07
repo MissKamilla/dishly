@@ -65,6 +65,21 @@ describe('recipes mapper', () => {
       ],
     });
   });
+
+  it('exposes failed status without the internal error message', () => {
+    const recipe = createRecipe({
+      status: RecipeStatus.FAILED,
+      errorMessage: 'unexpected_import_error',
+    });
+
+    const listItem = toRecipeListItemResponse(recipe);
+    const details = toRecipeDetailsResponse(recipe);
+
+    expect(listItem.status).toBe(RecipeStatus.FAILED);
+    expect(details.status).toBe(RecipeStatus.FAILED);
+    expect(listItem).not.toHaveProperty('errorMessage');
+    expect(details).not.toHaveProperty('errorMessage');
+  });
 });
 
 function createRecipe(overrides: Partial<Recipe> = {}): Recipe {

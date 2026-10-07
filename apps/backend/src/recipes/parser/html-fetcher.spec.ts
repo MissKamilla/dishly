@@ -48,7 +48,7 @@ describe('fetchHtml', () => {
     expect(options.signal).toBeInstanceOf(AbortSignal);
   });
 
-  it.each([403, 404, 500])('rejects HTTP %i', async (status) => {
+  it.each([403, 404, 406, 500])('rejects HTTP %i', async (status) => {
     const response = mockResponse(status, 'Error', 'text/html');
 
     await expect(fetchHtml(GOOD_FOOD_URL)).rejects.toThrow(
