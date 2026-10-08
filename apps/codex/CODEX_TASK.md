@@ -1,60 +1,26 @@
-# Dishly — Этап 7: Full Recipe Import Pipeline
+# Dishly — Этап 8: Frontend Architecture / Foundation
 
-Продолжаем разработку **Dishly**.
+Продолжаем разработку fullstack-проекта **Dishly**.
 
-Сейчас выполняем только:
-
-**Этап 7 — полный backend pipeline импорта рецепта.**
-
-На предыдущих этапах необходимые части уже были реализованы отдельно.
-
-Теперь их нужно правильно соединить:
+Backend MVP foundation уже реализован:
 
 ```text
-HTTP API
-   ↓
-PostgreSQL
-   ↓
-BullMQ
-   ↓
-Redis
-   ↓
-RecipeImportProcessor
-   ↓
-RecipeParserService
-   ↓
-PostgreSQL transaction
+Authentication
+Recipes API
+BullMQ + Redis
+Good Food Parser
+Recipe Import Pipeline
 ```
 
-И получить полный пользовательский сценарий:
+Сейчас начинаем frontend.
 
-```text
-POST /recipes/import
-        ↓
-Recipe = PENDING
-        ↓
-queue.add({ recipeId })
-        ↓
-Worker
-        ↓
-PROCESSING
-        ↓
-RecipeParserService
-        ↓
-ParsedRecipe
-        ↓
-Recipe + Ingredients + Steps
-        ↓
-COMPLETED
-```
+Текущий этап:
 
-При окончательной ошибке:
+**Этап 8 — Frontend Architecture / Foundation**
 
-```text
-PROCESSING
-    ↓
-FAILED
-```
+На этом этапе НЕ реализуем полноценную авторизацию, список рецептов, импорт рецепта или дизайн страниц.
+
+Главная задача — подготовить чистую frontend-основу, поверх которой следующие этапы будут реализовываться без архитектурных переделок.
 
 ---
 
@@ -64,326 +30,251 @@ FAILED
 
 1. Прочитай корневой `AGENTS.md`.
 2. Прочитай `apps/codex/AGENT_PROGRESS.md`.
-3. Изучи текущий `apps/codex/CODEX_TASK.md`.
-4. Выполни `git status`.
-5. Изучи фактический код, а не только этот prompt.
+3. Изучи текущий `apps/frontend`.
+4. Выполни:
+
+```bash
+git status
+```
+
+5. Проверь фактически установленные frontend dependencies и их версии.
+6. Не обновляй библиотеки только потому, что существует более новая версия.
 
 Особенно изучи:
 
 ```text
-apps/backend/src/recipes/
+apps/frontend/package.json
 
-recipes.controller.ts
-recipes.service.ts
-recipes.mapper.ts
-recipes.module.ts
+apps/frontend/src/
+apps/frontend/src/main.tsx
 
+vite.config.*
+tsconfig*
+
+apps/frontend/.env.example
+```
+
+Также проверь существующую настройку:
+
+```text
+React Router
+TanStack Query
+VITE_API_URL
+```
+
+Они были добавлены ещё на Bootstrap этапе, поэтому не реализовывай их повторно, если они уже работают.
+
+Сначала проведи аудит.
+
+До завершения аудита ничего не меняй.
+
+---
+
+# 2. Цель этапа
+
+После Этапа 8 frontend должен иметь понятную foundation:
+
+```text
+main.tsx
+   ↓
+App providers
+   ↓
+Router
+   ↓
+Layout
+   ↓
+Pages
+```
+
+И отдельный API слой:
+
+```text
+React / TanStack Query
+        ↓
+API client
+        ↓
+VITE_API_URL
+        ↓
+NestJS backend
+```
+
+Следующие этапы должны иметь возможность без переделки foundation добавить:
+
+```text
+Frontend Authentication
+Recipes List
+Add Recipe
+Processing UI
+Recipe Details
+Profile
+i18n
+```
+
+---
+
+# 3. Главный принцип
+
+Не пытайся сейчас заранее реализовать весь frontend.
+
+Нужна:
+
+```text
+простая
+понятная
+масштабируемая
+но не переусложнённая
+```
+
+структура.
+
+Не создавать архитектуру уровня enterprise SPA.
+
+Dishly пока небольшой проект.
+
+---
+
+# 4. Что уже используется
+
+Frontend stack:
+
+```text
+React
+TypeScript
+Vite
+React Router
+TanStack Query
+```
+
+На будущих этапах будет добавлен:
+
+```text
+i18next / react-i18next
+```
+
+Но на Этапе 8 i18n пока НЕ устанавливать.
+
+---
+
+# 5. Redux
+
+Redux Toolkit на этом этапе НЕ нужен.
+
+Не устанавливать:
+
+```text
+@reduxjs/toolkit
+react-redux
+```
+
+Server state будет находиться в:
+
+```text
+TanStack Query
+```
+
+Local UI state:
+
+```text
+React state
+```
+
+Redux добавляется только если позже появится реальная задача, которую нельзя нормально решить этими средствами.
+
+---
+
+# 6. Предлагаемая структура frontend
+
+Не создавать сотни директорий заранее.
+
+Предпочтительная основа:
+
+```text
+src/
+├── app/
+│   ├── App.tsx
+│   ├── router.tsx
+│   └── providers/
+│       └── AppProviders.tsx
+│
+├── pages/
+│   ├── HomePage/
+│   ├── LoginPage/
+│   ├── RecipesPage/
+│   └── NotFoundPage/
+│
+├── shared/
+│   ├── api/
+│   │   ├── api-client.ts
+│   │   ├── api-error.ts
+│   │   └── api.types.ts
+│   │
+│   ├── config/
+│   │   └── env.ts
+│   │
+│   └── ui/
+│
+├── main.tsx
+└── ...
+```
+
+Это ориентир.
+
+Не создавать пустые:
+
+```text
+features/
 entities/
-  recipe.entity.ts
-  recipe-ingredient.entity.ts
-  recipe-step.entity.ts
-
-queue/
-  recipe-import.contract.ts
-  recipe-import.queue.ts
-  recipe-import.processor.ts
-
-parser/
-  recipe-parser.service.ts
-  recipe-parser.error.ts
-  types/parsed-recipe.ts
+widgets/
+hooks/
+utils/
+services/
+store/
 ```
 
-Также:
+только потому, что они могут понадобиться когда-нибудь.
 
-```text
-apps/backend/src/auth/
-apps/backend/src/database/
-apps/backend/package.json
-```
-
-Не начинай изменения до завершения аудита.
+Добавляй новые folders тогда, когда появляется реальный код.
 
 ---
 
-# 2. Текущее состояние
+# 7. Не использовать сложную Feature-Sliced архитектуру
 
-Уже завершены:
-
-```text
-Этап 1 — Project Bootstrap
-Этап 2 — Database Schema
-Этап 3 — Backend Authentication
-Этап 4 — Recipes API
-Этап 5 — BullMQ + Redis
-Этап 6 — Good Food Parser
-```
-
----
-
-# 3. Что уже есть и НЕ нужно реализовывать заново
-
-## Recipes API
-
-Существуют:
-
-```http
-GET    /recipes
-GET    /recipes/:id
-DELETE /recipes/:id
-```
-
-Ownership уже реализован.
-
-Не переписывай существующий Recipes API без необходимости.
-
----
-
-## Recipe statuses
-
-Уже существуют:
-
-```ts
-enum RecipeStatus {
-  PENDING = "pending",
-  PROCESSING = "processing",
-  COMPLETED = "completed",
-  FAILED = "failed",
-}
-```
-
-Не менять enum.
-
----
-
-## Queue
-
-Очередь:
+Не внедрять полный:
 
 ```text
-recipe-import
+Feature-Sliced Design
+Atomic Design
+Clean Architecture frontend
+Hexagonal frontend
 ```
 
-Job:
+только ради структуры.
+
+Dishly должен быть понятен разработчику без отдельной документации по архитектурному framework.
+
+Достаточно:
 
 ```text
-import-recipe
+app
+pages
+shared
 ```
 
-Payload:
-
-```ts
-interface ImportRecipeJobData {
-  recipeId: number;
-}
-```
-
-Producer уже реализован через:
-
-```ts
-RecipeImportQueue;
-```
-
-и:
-
-```ts
-queue.add();
-```
-
-Job options уже содержат:
+А `features` можно добавить позже, когда реально появятся:
 
 ```text
-attempts: 3
-
-exponential backoff
-delay: 1000 ms
+auth
+recipe import
+profile
 ```
-
-Не менять job payload.
-
-Не помещать URL или ParsedRecipe в Redis.
-
-PostgreSQL остаётся source of truth.
-
----
-
-## Parser
-
-Уже существует:
-
-```ts
-RecipeParserService.parse(url);
-```
-
-который возвращает:
-
-```ts
-ParsedRecipe;
-```
-
-Parser уже:
-
-- валидирует Good Food URL;
-- защищает fetch от SSRF;
-- получает HTML;
-- извлекает JSON-LD;
-- находит Schema.org Recipe;
-- нормализует поля;
-- нормализует ingredients;
-- нормализует steps;
-- поддерживает groups;
-- проверяет результат.
-
-Не дублировать parser logic внутри worker.
-
----
-
-# 4. RecipeParserError
-
-Уже существует:
-
-```ts
-RecipeParserError;
-```
-
-с кодами:
-
-```text
-unsupported_url
-fetch_failed
-recipe_not_found
-invalid_recipe_data
-```
-
-Также существует:
-
-```ts
-error.retryable;
-```
-
-Это специально было подготовлено для текущего этапа.
-
-Используй это свойство для решения:
-
-```text
-делать BullMQ retry
-или
-завершить job окончательно
-```
-
-Не вычисляй retryability второй раз в processor.
-
----
-
-# 5. Главная цель этапа
-
-После завершения должны работать:
-
-```http
-POST /recipes/import
-POST /recipes/:id/retry
-```
-
-и полный background flow.
-
----
-
-# 6. Архитектура ответственности
-
-Не превращать `RecipesController` или `RecipeImportProcessor` в огромные классы.
-
-Предпочтительное разделение:
-
-```text
-RecipesController
-        ↓
-RecipeImportService
-        ↓
-PostgreSQL + RecipeImportQueue
-```
-
-и:
-
-```text
-RecipeImportProcessor
-        ↓
-RecipeImportService
-        +
-RecipeParserService
-```
-
-Существующий:
-
-```text
-RecipesService
-```
-
-сейчас отвечает за:
-
-```text
-list
-details
-delete
-```
-
-Импорт — отдельный workflow.
-
-Поэтому создание отдельного:
-
-```text
-RecipeImportService
-```
-
-на этом этапе оправдано.
-
-Не создавать дополнительный Repository layer, factories или command bus.
-
----
-
-# 7. Предпочтительная структура
-
-Например:
-
-```text
-src/recipes/
-│
-├── dto/
-│   ├── import-recipe.dto.ts
-│   └── list-recipes-query.dto.ts
-│
-├── import/
-│   ├── recipe-import.service.ts
-│   └── recipe-import.errors.ts
-│
-├── parser/
-├── queue/
-├── entities/
-│
-├── recipes.controller.ts
-├── recipes.service.ts
-├── recipes.mapper.ts
-└── recipes.module.ts
-```
-
-Не обязательно создавать `recipe-import.errors.ts`, если нескольких констант/функций достаточно.
-
-Главный критерий:
-
-```text
-понятная ответственность
-```
-
-а не количество файлов.
 
 ---
 
 # 8. Как со мной работать
 
-Не реализовывай весь этап одним огромным diff.
+Работай логическими блоками.
 
-Работаем крупными логическими блоками.
-
-Перед каждым блоком:
+Перед каждым блоком объясняй:
 
 ## Что делаем
 
@@ -391,1857 +282,1218 @@ src/recipes/
 
 ## Какие файлы меняются
 
-## Как проверяем
+## Как проверить
 
-После реализации:
+Не переписывай сразу весь frontend.
 
-- запускай focused tests;
-- запускай TypeScript/build/lint когда уместно;
-- обновляй `apps/codex/AGENT_PROGRESS.md`.
+Если требуется dependency:
+
+1. сначала проверь `package.json`;
+2. объясни зачем она нужна;
+3. покажи команду;
+4. дождись моего подтверждения.
 
 Не создавай Git commit без моего разрешения.
 
-Если нужна новая dependency — сначала объясни зачем.
+После крупных изменений обновляй:
 
-Ожидается, что для этого этапа новых dependencies не потребуется.
+```text
+apps/codex/AGENT_PROGRESS.md
+```
 
 ---
 
-# Step 1 — аудит integration points
+# Step 1 — аудит текущего frontend
 
-Сначала ничего не меняй.
+Сначала изучи текущее состояние.
 
-Проверь:
+Покажи:
 
-### RecipesService
+1. текущую структуру `src`;
+2. установленную версию React;
+3. установленную версию React Router;
+4. установленную версию TanStack Query;
+5. существующий router setup;
+6. существующий QueryClient setup;
+7. существующий API health-check;
+8. существующие env variables;
+9. какие файлы относятся к Vite demo и могут быть удалены;
+10. что можно сохранить без изменений.
 
-- текущие методы;
-- mapper;
-- ownership;
-- repository dependencies.
-
-### RecipeImportQueue
-
-- `enqueue`;
-- attempts;
-- backoff;
-- retention.
-
-### RecipeImportProcessor
-
-- job validation;
-- logger;
-- completed/failed events;
-- текущие tests.
-
-### RecipeParserService
-
-- public API;
-- `RecipeParserError`;
-- `retryable`.
-
-### Entity
-
-Проверь поля:
-
-```text
-Recipe
-RecipeIngredient
-RecipeStep
-```
-
-### TypeORM
-
-Проверь доступный `DataSource` и способ выполнения transaction в текущем NestJS setup.
-
-После аудита покажи:
-
-1. какие существующие компоненты будут переиспользованы;
-2. какие новые файлы нужны;
-3. какие текущие файлы нужно изменить;
-4. нужна ли migration;
-5. есть ли blocker.
-
-Ожидаемый ответ:
-
-```text
-migration не требуется
-```
-
-Если это не так — остановись и объясни почему.
+После этого остановись.
 
 ---
 
-# Step 2 — ImportRecipeDto
+# Step 2 — очистить Bootstrap/demo код
 
-Создай DTO для:
+После аудита удалить оставшийся Vite/demo код, который не относится к Dishly.
 
-```http
-POST /recipes/import
-```
-
-Body:
-
-```json
-{
-  "url": "https://www.bbcgoodfood.com/recipes/..."
-}
-```
-
-DTO должен принимать только:
-
-```ts
-url: string;
-```
-
-Добавь разумную validation:
+Например, если существуют:
 
 ```text
-string
-не пустая
-разумная максимальная длина
+Vite logos
+counter demo
+unused CSS
+demo components
 ```
 
-Не принимай:
+их удалить.
+
+Не удалять работающую инфраструктуру:
 
 ```text
-userId
-status
-title
-ingredients
-steps
+Router
+QueryClient
+env
 ```
 
-`userId` получаем исключительно через authenticated user.
+только ради перестройки структуры.
 
 ---
 
-# Step 3 — ранняя URL validation
+# Step 3 — App entry point
 
-Не создавай Recipe для URL, который Dishly заведомо не поддерживает.
-
-До INSERT:
+Сделать понятную цепочку:
 
 ```text
-ImportRecipeDto
-       ↓
-validateGoodFoodUrl()
-       ↓
-canonical URL
+main.tsx
+↓
+AppProviders
+↓
+App
 ```
 
-Используй уже существующий validator parser-а.
+`main.tsx` должен быть минимальным.
 
-Не создавай второй allowlist.
+Пример ответственности:
 
-Не копируй validation logic.
+```text
+React root
+↓
+global providers
+↓
+application
+```
+
+Не помещать туда:
+
+```text
+API requests
+auth logic
+routes definitions
+business logic
+```
 
 ---
 
-## Поведение
+# Step 4 — AppProviders
+
+Создать единое место для application-level providers.
 
 Например:
 
 ```text
-https://www.bbcgoodfood.com/recipes/example
-→ допустимо
+src/app/providers/AppProviders.tsx
 ```
+
+На текущем этапе там может находиться:
 
 ```text
-https://example.com/recipe
-→ 400 Bad Request
+QueryClientProvider
+RouterProvider
 ```
+
+или router может оставаться внутри `App`, если это соответствует текущей установленной версии React Router и получается проще.
+
+Не создавать provider ради каждого React context.
+
+Главная цель:
 
 ```text
-http://localhost
-→ 400 Bad Request
+main.tsx не должен постепенно превращаться в список из 10 wrappers
 ```
-
-Unsupported URL должен быть отклонён:
-
-**до создания Recipe и до queue.add().**
 
 ---
 
-# Step 4 — canonical sourceUrl
+# Step 5 — QueryClient
 
-После успешной validation сохраняй нормализованный:
+Проверь существующую настройку TanStack Query.
+
+Нужен единый:
 
 ```ts
-URL.href;
+QueryClient;
 ```
 
-а не произвольную строку, которую прислал пользователь.
+для приложения.
 
-То есть:
+Не создавать QueryClient внутри React component render.
 
-```text
-input URL
-↓
-URL parser / validator
-↓
-canonical sourceUrl
-↓
-PostgreSQL
-```
-
-Не модифицируй URL дополнительными эвристиками.
-
----
-
-# Step 5 — RecipeImportService
-
-Создай:
-
-```text
-RecipeImportService
-```
-
-Он должен содержать бизнес-логику import workflow.
-
-Не помещай её в Controller.
-
-Предполагаемые обязанности:
-
-```text
-requestImport()
-prepareForProcessing()
-completeImport()
-failImport()
-retryImport()
-```
-
-Точные имена можно скорректировать после аудита.
-
----
-
-# Step 6 — создание PENDING Recipe
-
-При:
-
-```http
-POST /recipes/import
-```
-
-после проверки URL создать:
-
-```ts
-Recipe {
-  sourceUrl,
-  userId,
-  status: PENDING
-}
-```
-
-Остальные parsed поля:
-
-```text
-title
-description
-imageUrl
-servings
-prepTimeMinutes
-cookTimeMinutes
-```
-
-остаются:
-
-```text
-null
-```
-
-Не создавать Ingredient/Step на этом этапе.
-
----
-
-# Step 7 — enqueue
-
-После сохранения Recipe:
-
-```text
-Recipe
-↓
-RecipeImportQueue.enqueue(recipe.id)
-```
-
-Job data остаётся:
-
-```ts
-{
-  recipeId;
-}
-```
-
-Не передавать:
-
-```text
-URL
-userId
-ParsedRecipe
-```
-
-в очередь.
-
----
-
-# Step 8 — проблема PostgreSQL + Redis atomicity
-
-PostgreSQL transaction не может атомарно включить Redis.
-
-То есть возможна ситуация:
-
-```text
-INSERT Recipe
-→ success
-
-queue.add()
-→ fail
-```
-
-На этом этапе НЕ реализовывать transactional outbox.
-
-Это слишком сложно для текущего MVP.
-
-Использовать простой контролируемый подход.
-
-Если `queue.add()` не удался:
-
-```text
-Recipe → FAILED
-```
-
-и сохранить безопасную внутреннюю причину ошибки.
-
-HTTP request должен завершиться подходящей ошибкой, например:
-
-```text
-503 Service Unavailable
-```
-
-Не оставлять Recipe бесконечно в:
-
-```text
-PENDING
-```
-
-если enqueue уже точно не удался.
-
-Зафиксируй в коде/документации, что transactional outbox является возможным future improvement.
-
----
-
-# Step 9 — POST /recipes/import
-
-Добавить endpoint:
-
-```http
-POST /recipes/import
-```
-
-Endpoint protected существующим global auth guard.
-
-Controller получает:
-
-```text
-@CurrentUser()
-+
-ImportRecipeDto
-```
-
-и вызывает:
-
-```text
-RecipeImportService
-```
-
----
-
-## Successful response
-
-Использовать:
-
-```http
-202 Accepted
-```
-
-Потому что Recipe ещё не обработан.
-
-Вернуть существующее публичное представление Recipe.
-
-Пример:
-
-```json
-{
-  "id": 42,
-  "title": null,
-  "sourceUrl": "...",
-  "imageUrl": null,
-  "servings": null,
-  "prepTimeMinutes": null,
-  "cookTimeMinutes": null,
-  "status": "pending",
-  "createdAt": "...",
-  "updatedAt": "..."
-}
-```
-
-Не возвращать:
-
-```text
-job object
-BullMQ id
-Redis data
-userId
-```
-
----
-
-# Step 10 — Processor получает Recipe
-
-Текущий `RecipeImportProcessor` должен начать реальную обработку.
-
-Job:
-
-```ts
-{
-  recipeId: 42;
-}
-```
-
-Processor получает Recipe из PostgreSQL по:
-
-```text
-recipeId
-```
-
-Не использовать URL из Redis.
-
----
-
-# Step 11 — поведение при отсутствующем Recipe
-
-Recipe может быть удалён пользователем, пока job ожидал выполнения.
-
-Если:
-
-```text
-recipeId
-```
-
-больше не существует:
-
-```text
-log warning
-→ завершить job без parser
-```
-
-Не делать бессмысленные retries.
-
-Не восстанавливать удалённый Recipe.
-
-Это валидный пользовательский сценарий.
-
----
-
-# Step 12 — защита от duplicate/stale jobs
-
-Processor должен учитывать текущий Recipe.status.
-
-Обрабатываем:
-
-```text
-PENDING
-PROCESSING
-```
-
-Для:
-
-```text
-COMPLETED
-```
-
-не парсить повторно.
-
-Залогировать и завершить job как no-op.
-
-Для:
-
-```text
-FAILED
-```
-
-обычный старый job не должен самопроизвольно запускать импорт снова.
-
-Manual retry сначала явно переведёт Recipe обратно в:
-
-```text
-PENDING
-```
-
----
-
-# Step 13 — PROCESSING
-
-Перед вызовом parser:
-
-```text
-Recipe.status = PROCESSING
-Recipe.errorMessage = null
-```
-
-Сохранить изменение в PostgreSQL.
-
-После этого:
-
-```ts
-RecipeParserService.parse(recipe.sourceUrl);
-```
-
----
-
-# Step 14 — Parser не должен знать про БД
-
-НЕ изменять:
-
-```ts
-RecipeParserService;
-```
-
-так, чтобы он:
-
-- принимал Recipe Entity;
-- работал с Repository;
-- менял status;
-- сохранял ingredients.
-
-Он продолжает выполнять только:
-
-```text
-URL
-↓
-ParsedRecipe
-```
-
-Persistence находится за пределами parser.
-
----
-
-# Step 15 — успешное сохранение ParsedRecipe
-
-После:
-
-```ts
-const parsedRecipe = await parser.parse(...)
-```
-
-нужно сохранить:
-
-```text
-Recipe
-RecipeIngredient[]
-RecipeStep[]
-```
-
----
-
-# Step 16 — обязательная PostgreSQL transaction
-
-Сохранение результата должно быть атомарным.
-
-Нельзя допустить:
-
-```text
-Recipe обновился
-
-но только половина ingredients сохранилась
-```
-
-или:
-
-```text
-Ingredients сохранились
-но status остался PROCESSING
-```
-
-Используй одну TypeORM transaction.
-
-Концептуально:
-
-```text
-BEGIN
-
-update Recipe fields
-
-delete/replace old RecipeIngredient rows
-
-delete/replace old RecipeStep rows
-
-insert Ingredients
-
-insert Steps
-
-status = COMPLETED
-errorMessage = null
-
-COMMIT
-```
-
-Если операция падает:
-
-```text
-ROLLBACK
-```
-
----
-
-# Step 17 — TypeORM transaction rule
-
-Внутри transaction используй только:
-
-```text
-transactional EntityManager
-```
-
-и repositories, полученные из него.
-
-Не использовать обычные injected repositories внутри transaction callback.
-
-Например концептуально:
-
-```ts
-dataSource.transaction(async (manager) => {
-  const recipeRepository = manager.getRepository(Recipe);
-  const ingredientRepository = manager.getRepository(RecipeIngredient);
-  const stepRepository = manager.getRepository(RecipeStep);
-
-  ...
-});
-```
-
-Не смешивать transactional и global repository.
-
----
-
-# Step 18 — mapping ParsedRecipe → Entity
-
-Recipe:
-
-```text
-ParsedRecipe.title
-→ Recipe.title
-
-description
-→ description
-
-imageUrl
-→ imageUrl
-
-servings
-→ servings
-
-prepTimeMinutes
-→ prepTimeMinutes
-
-cookTimeMinutes
-→ cookTimeMinutes
-```
-
----
-
-## Ingredients
-
-Для каждого:
-
-```ts
-parsedRecipe.ingredients[index];
-```
-
-создать:
-
-```ts
-RecipeIngredient {
-  rawText,
-  name,
-  quantity,
-  unit,
-
-  recipeId,
-  position: index + 1
-}
-```
-
-Порядок:
-
-```text
-1, 2, 3...
-```
-
-Не использовать array index `0` как database position.
-
----
-
-## Steps
-
-Для:
-
-```ts
-parsedRecipe.steps[index];
-```
-
-создать:
-
-```ts
-RecipeStep {
-  text,
-  group,
-  durationMinutes,
-  imageUrl,
-
-  recipeId,
-  position: index + 1
-}
-```
-
----
-
-# Step 19 — existing children
-
-Даже если сейчас первый импорт обычно не имеет children, persistence logic должна быть безопасна при повторной обработке.
-
-Перед вставкой нового результата внутри transaction можно удалить существующие:
-
-```text
-RecipeIngredient
-RecipeStep
-```
-
-конкретного Recipe.
-
-После этого вставить актуальный ParsedRecipe.
-
-Не использовать ORM cascade-save.
-
-Не удалять children за пределами transaction.
-
----
-
-# Step 20 — COMPLETED
-
-Только после успешного сохранения всех данных:
-
-```text
-Recipe.status = COMPLETED
-Recipe.errorMessage = null
-```
-
-После commit Recipe считается готовым.
-
-Не ставить:
-
-```text
-COMPLETED
-```
-
-до сохранения ingredients/steps.
-
----
-
-# Step 21 — parser permanent errors
-
-Уже существует:
-
-```ts
-RecipeParserError.retryable === false;
-```
+Минимально определить разумные defaults.
 
 Например:
 
 ```text
-unsupported_url
-recipe_not_found
-invalid_recipe_data
+retry
+refetchOnWindowFocus
+staleTime
 ```
 
-При permanent error:
-
-```text
-Recipe → FAILED
-```
-
-после чего job не должен выполнять оставшиеся BullMQ attempts.
-
-Используй механизм BullMQ для unrecoverable error.
-
-Не меняй глобальное:
-
-```text
-attempts: 3
-```
-
-только ради permanent parser errors.
+Но НЕ задавай глобально агрессивную конфигурацию без причины.
 
 ---
 
-# Step 22 — retryable parser errors
+# 6. Retry TanStack Query
 
-Для:
+Не путать:
 
-```ts
-RecipeParserError.retryable === true;
-```
-
-например:
-
-```text
-timeout
-DNS/network temporary failure
-HTTP 429
-HTTP 5xx
-```
-
-BullMQ должен использовать уже существующий:
-
-```text
-attempts = 3
-exponential backoff
-```
-
-Если ещё есть попытки:
-
-```text
-Recipe остаётся PROCESSING
-```
-
-и exception должен быть проброшен в BullMQ.
-
-Не переводить Recipe в FAILED после первой временной ошибки.
-
----
-
-# Step 23 — final automatic attempt
-
-Когда последняя автоматическая попытка тоже не удалась:
-
-```text
-Recipe.status = FAILED
-```
-
-Перед реализацией внимательно проверь семантику текущей установленной версии BullMQ для:
-
-```text
-attempts
-attemptsMade
-attemptsStarted
-```
-
-Не угадывай off-by-one.
-
-Создай небольшой helper типа:
-
-```text
-isFinalAttempt(job)
-```
-
-только если он действительно улучшает читаемость.
-
-Обязательно покрой его поведением в tests.
-
----
-
-# Step 24 — unexpected errors
-
-Не только parser может упасть.
-
-Возможны:
-
-```text
-database errors
-programming errors
-unexpected errors
-```
-
-Не проглатывать их.
-
-BullMQ должен получить настоящий `Error`.
-
-Для неожиданной ошибки допустимо использовать обычный retry механизм.
-
-При окончательной неудаче Recipe должен стать:
-
-```text
-FAILED
-```
-
-если PostgreSQL доступен и состояние можно обновить.
-
-Не маскируй исходную ошибку ради изменения status.
-
----
-
-# Step 25 — errorMessage
-
-Сейчас Entity содержит:
-
-```text
-errorMessage
-```
-
-Не сохраняй туда:
-
-- HTML страницы;
-- JWT;
-- cookies;
-- stack trace;
-- secrets.
-
-Можно сохранять небольшой безопасный internal summary.
-
-Например:
-
-```text
-recipe_not_found
-fetch_failed
-invalid_recipe_data
-queue_unavailable
-unexpected_import_error
-```
-
-или другую стабильную короткую форму.
-
-Предпочтительно не хранить сырой внешний error message, если он может содержать неожиданные данные.
-
----
-
-# Step 26 — API errorMessage пока не раскрывать
-
-Текущий public API намеренно не возвращает:
-
-```text
-Recipe.errorMessage
-```
-
-На этом этапе сохрани это поведение.
-
-Frontend позже сможет показать:
-
-```text
-Import failed
-```
-
-на основании:
-
-```text
-status === FAILED
-```
-
-Если в будущем понадобятся локализованные подробные причины ошибки, лучше спроектировать отдельный stable error code.
-
-Не отдавать сейчас raw `errorMessage` только потому, что поле существует.
-
----
-
-# Step 27 — logging
-
-Processor должен логировать:
-
-```text
-job id
-recipe id
-attempt
-successful completion
-failure category
-```
-
-Но не логировать:
-
-```text
-полный HTML
-JWT
-cookie
-password
-```
-
-Для permanent parser errors можно логировать техническую причину, а в БД сохранять безопасное значение.
-
-Использовать NestJS Logger.
-
----
-
-# Step 28 — Manual Retry API
-
-Добавить:
-
-```http
-POST /recipes/:id/retry
-```
-
-Endpoint protected.
-
-Использовать:
-
-```text
-@CurrentUser()
-+
-recipe id
-```
-
----
-
-## Правила
-
-Retry разрешён только если:
-
-```text
-Recipe принадлежит current user
-AND
-Recipe.status === FAILED
-```
-
-Если Recipe отсутствует или чужой:
-
-```text
-404
-```
-
-Если Recipe существует, но status:
-
-```text
-PENDING
-PROCESSING
-COMPLETED
-```
-
-вернуть:
-
-```text
-409 Conflict
-```
-
-Не делать retry completed Recipe.
-
----
-
-# Step 29 — manual retry transition
-
-При разрешённом retry:
-
-```text
-FAILED
-  ↓
-PENDING
-```
-
-Также:
-
-```text
-errorMessage = null
-```
-
-После этого:
-
-```text
-RecipeImportQueue.enqueue(recipe.id)
-```
-
-Response:
-
-```http
-202 Accepted
-```
-
----
-
-# Step 30 — concurrent retry protection
-
-Не допускай простой race:
-
-```text
-Request A retry
-Request B retry
-```
-
-→ две одинаковые jobs.
-
-Предпочтительно изменение:
-
-```text
-FAILED → PENDING
-```
-
-сделать условно на уровне database query.
-
-Например условие должно учитывать:
-
-```text
-id
-userId
-status = FAILED
-```
-
-Если affected rows = 0:
-
-проверить, это:
-
-```text
-404
-```
-
-или:
-
-```text
-409
-```
-
-Не создавай distributed lock ради этой задачи.
-
----
-
-# Step 31 — enqueue failure при manual retry
-
-Если:
-
-```text
-FAILED
-↓
-PENDING
-↓
-queue.add() failed
-```
-
-Recipe нельзя оставлять PENDING.
-
-Верни:
-
-```text
-FAILED
-```
-
-с безопасной причиной.
-
-HTTP:
-
-```text
-503 Service Unavailable
-```
-
----
-
-# Step 32 — Controller
-
-Итоговые routes после этапа:
-
-```http
-GET    /recipes
-GET    /recipes/:id
-DELETE /recipes/:id
-
-POST   /recipes/import
-POST   /recipes/:id/retry
-```
-
-Controller не содержит:
-
-```text
-Repository
-transaction
-parser logic
-queue.add directly
-```
-
-Controller:
-
-```text
-HTTP
-↓
-Service
-```
-
----
-
-# Step 33 — existing RecipesService
-
-Не переписывай существующие:
-
-```text
-findAllForUser
-findOneForUser
-deleteForUser
-```
-
-без необходимости.
-
-Import workflow лучше не смешивать с list/details/delete, если отдельный `RecipeImportService` делает границу ответственности понятнее.
-
-Не переносить существующий рабочий код только ради новой структуры.
-
----
-
-# Step 34 — deletion during processing
-
-Пользователь может выполнить:
-
-```http
-DELETE /recipes/:id
-```
-
-пока job выполняется.
-
-Это допустимо.
-
-Processor не должен восстанавливать Recipe.
-
-Если Recipe исчез:
-
-```text
-до начала processing
-```
-
-→ no-op.
-
-Если Recipe исчез:
-
-```text
-после parser, до persistence
-```
-
-persistence layer должен обнаружить отсутствие Recipe и не создавать orphan children.
-
-Не усложняй это distributed locking.
-
-Главное:
-
-```text
-удалённый Recipe не должен появиться снова
-```
-
----
-
-# Step 35 — tests: ImportRecipeDto / Controller
-
-Проверить:
-
-```text
-valid URL → service called
-unsupported URL → 400
-missing url → 400
-extra fields → rejected existing ValidationPipe
-```
-
-Для endpoint проверить:
-
-```text
-202 Accepted
-```
-
-и authentication.
-
-Не тестировать parser заново через controller tests.
-
----
-
-# Step 36 — tests: requestImport
-
-Проверить:
-
-```text
-valid URL
-→ PENDING Recipe created
-→ queue.enqueue(recipe.id)
-```
-
-Проверить:
-
-```text
-canonical URL сохраняется
-```
-
-Проверить:
-
-```text
-invalid/unsupported URL
-→ Recipe НЕ создаётся
-→ queue НЕ вызывается
-```
-
----
-
-# Step 37 — tests: enqueue failure
-
-Проверить:
-
-```text
-Recipe created
-↓
-queue.enqueue throws
-↓
-Recipe → FAILED
-↓
-503
-```
-
-Не оставлять PENDING.
-
----
-
-# Step 38 — tests: successful processor flow
-
-Mock parser:
-
-```ts
-ParsedRecipe;
-```
-
-Проверить:
-
-```text
-load Recipe
-↓
-PROCESSING
-↓
-parser.parse(sourceUrl)
-↓
-transaction
-↓
-Recipe fields saved
-↓
-Ingredients saved
-↓
-Steps saved
-↓
-COMPLETED
-```
-
-Проверить positions:
-
-```text
-1..N
-```
-
----
-
-# Step 39 — tests: transaction mapping
-
-Обязательно проверить:
-
-```text
-rawText
-name
-quantity
-unit
-position
-```
-
-для Ingredients.
-
-И:
-
-```text
-text
-group
-durationMinutes
-imageUrl
-position
-```
-
-для Steps.
-
-Не тестировать TypeORM internals.
-
-Тестировать наш mapping и orchestration.
-
----
-
-# Step 40 — tests: permanent parser failure
-
-Mock:
-
-```ts
-RecipeParserError {
-  retryable: false
-}
-```
-
-Проверить:
-
-```text
-Recipe → FAILED
-```
-
-и job становится unrecoverable без автоматических повторов.
-
-Не проверять это только текстом exception.
-
-Проверь реально выбранный BullMQ error type/behavior на уровне processor unit test.
-
----
-
-# Step 41 — tests: retryable parser failure
-
-Первая попытка:
-
-```text
-retryable error
-```
-
-если attempts ещё есть:
-
-```text
-Recipe остаётся PROCESSING
-```
-
-и exception пробрасывается.
-
-Не выставляется FAILED.
-
----
-
-# Step 42 — tests: final failed attempt
-
-На последней попытке:
-
-```text
-retryable error
-```
-
-→
-
-```text
-Recipe → FAILED
-```
-
-и exception остаётся failed job error.
-
-Обязательно проверить boundary между:
-
-```text
-ещё будет retry
-```
-
-и:
-
-```text
-это последняя попытка
-```
-
----
-
-# Step 43 — tests: duplicate/stale jobs
-
-Проверить:
-
-```text
-Recipe COMPLETED
-→ parser не вызывается
-```
-
-```text
-Recipe FAILED
-→ старый job не запускает новый import
-```
-
-```text
-Recipe отсутствует
-→ no-op
-```
-
----
-
-# Step 44 — tests: manual retry
-
-Проверить:
-
-```text
-FAILED own Recipe
-→ PENDING
-→ enqueue
-→ 202
-```
-
-```text
-foreign Recipe
-→ 404
-```
-
-```text
-missing Recipe
-→ 404
-```
-
-```text
-COMPLETED/PENDING/PROCESSING
-→ 409
-```
-
-и queue failure возвращает Recipe в:
-
-```text
-FAILED
-```
-
----
-
-# Step 45 — сохранение результата должно быть атомарным
-
-Добавь тест, подтверждающий, что persistence method использует одну transaction boundary.
-
-Не пытайся unit-тестом доказать ACID PostgreSQL.
-
-Нужно проверить нашу архитектуру:
-
-```text
-все записи выполняются через transactional manager
-```
-
-Если для реальной уверенности нужен один integration/manual DB test — выполни его отдельно.
-
----
-
-# Step 46 — manual end-to-end verification
-
-После unit tests запусти настоящую инфраструктуру:
-
-```bash
-docker compose up -d
-```
-
-Проверить:
-
-```bash
-docker compose ps
-```
-
-PostgreSQL и Redis должны быть healthy.
-
----
-
-# Step 47 — запустить backend
-
-Запустить:
-
-```bash
-npm run start:dev
-```
-
-из:
-
 ```text
-apps/backend
-```
-
----
-
-# Step 48 — authentication
-
-Используй существующий auth API.
-
-Создай или залогинь test user и сохрани cookie.
-
-Не обходи authentication ради проверки import endpoint.
-
----
-
-# Step 49 — реальный import
-
-Выполнить:
-
-```http
-POST /recipes/import
+frontend request retry
 ```
 
 с:
 
 ```text
-https://www.bbcgoodfood.com/recipes/marry-me-chicken
+BullMQ recipe import retry
 ```
 
-Ожидаемый первый response:
+Это разные механизмы.
+
+Не делать frontend API requests бесконечно.
+
+Можно оставить стандартное или небольшое количество retry для GET requests.
+
+Для mutations не добавлять автоматические повторные POST запросы без осознанной причины.
+
+Особенно в будущем:
 
 ```text
-202
-status = pending
-```
-
-После этого worker должен обработать job.
-
----
-
-# Step 50 — проверить полный state flow
-
-Логи/БД должны подтверждать:
-
-```text
-PENDING
-↓
-PROCESSING
-↓
-COMPLETED
-```
-
-Не добавляй искусственные задержки в production code только чтобы успеть визуально увидеть PROCESSING.
-
----
-
-# Step 51 — проверить результат через API
-
-После завершения:
-
-```http
-GET /recipes/:id
-```
-
-должен содержать реальные данные Good Food.
-
-Ожидаемые ориентиры для текущего тестового рецепта:
-
-```text
-title = 'Marry me' chicken
-
-servings = 4
-
-prepTimeMinutes = 20
-
-cookTimeMinutes = 45
-
-ingredients = 12
-
-steps = 4
-```
-
-Эти значения должны приходить из parser-а.
-
-Не хардкодить их в import pipeline.
-
----
-
-# Step 52 — проверить PostgreSQL
-
-Прямо в БД проверить:
-
-```text
-recipes
-recipe_ingredients
-recipe_steps
-```
-
-Убедиться:
-
-```text
-Recipe status = completed
-
-ingredients recipe_id корректный
-
-steps recipe_id корректный
-
-positions начинаются с 1
-
-нет orphan rows
-```
-
----
-
-# Step 53 — проверить invalid URL
-
-Например unsupported domain.
-
-```http
 POST /recipes/import
 ```
 
-→
-
-```text
-400
-```
-
-Проверить PostgreSQL:
-
-```text
-Recipe row не создан
-```
-
-Проверить Redis:
-
-```text
-job не создан
-```
+не должен случайно выполниться несколько раз из-за frontend retry policy.
 
 ---
 
-# Step 54 — проверить permanent parser failure
+# Step 7 — environment config
 
-Используй безопасный тестовый сценарий.
+Сейчас frontend использует:
 
-Не ломай production parser искусственным condition вроде:
+```text
+VITE_API_URL
+```
+
+Создать одно место для чтения environment configuration.
+
+Например:
+
+```text
+src/shared/config/env.ts
+```
+
+Не использовать:
 
 ```ts
-if (recipeId === 999) throw ...
+import.meta.env.VITE_API_URL;
 ```
 
-Можно использовать unit/integration mocks.
-
-Для live/manual проверки можно использовать поддерживаемый Good Food URL без Recipe data, только если такой URL корректно проходит текущий validator и запрос безопасен.
-
-Не делай обходы сайта.
+в десятках компонентов.
 
 ---
 
-# Step 55 — проверить Retry
+# Step 8 — validate VITE_API_URL
 
-Создай контролируемый FAILED Recipe либо используй результат реального failed import.
+Frontend должен рано обнаруживать неправильную configuration.
 
-Выполни:
-
-```http
-POST /recipes/:id/retry
-```
-
-Проверить:
+Минимально проверить:
 
 ```text
-FAILED
-↓
-PENDING
-↓
-BullMQ
-↓
-processing
+VITE_API_URL существует
+является непустой строкой
+может быть преобразован в URL
 ```
 
-и дальнейший результат.
+Не нужно устанавливать Zod только ради одной env variable.
+
+Обычной небольшой функции достаточно.
 
 ---
 
-# Step 56 — queue regression
+# Step 9 — API URL
 
-Существующий:
+В development ожидается что-то вроде:
+
+```env
+VITE_API_URL=http://localhost:3000
+```
+
+Но не хардкодить:
+
+```ts
+const API_URL = "http://localhost:3000";
+```
+
+в коде.
+
+Также избегай проблем вида:
+
+```text
+http://localhost:3000//recipes
+```
+
+API client должен аккуратно собирать URL.
+
+Не создавай сложный URL builder framework.
+
+---
+
+# Step 10 — единый API client
+
+Создай:
+
+```text
+src/shared/api/api-client.ts
+```
+
+Нужен небольшой wrapper поверх стандартного:
+
+```ts
+fetch();
+```
+
+Axios пока не устанавливать.
+
+Стандартного fetch достаточно.
+
+---
+
+# Step 11 — API client responsibilities
+
+API client должен централизованно обеспечивать:
+
+```text
+base URL
+credentials
+headers
+JSON serialization
+JSON parsing
+HTTP errors
+204 responses
+```
+
+Пример conceptual API:
+
+```ts
+apiRequest<T>(path, options);
+```
+
+или похожий простой вариант.
+
+Не создавай класс:
+
+```text
+ApiClientFactory
+HttpRepositoryAdapter
+BaseService<T>
+```
+
+без необходимости.
+
+---
+
+# Step 12 — credentials
+
+Очень важно.
+
+Backend authentication использует:
+
+```text
+JWT
++
+HttpOnly cookie
+```
+
+Поэтому каждый frontend request должен поддерживать:
+
+```ts
+credentials: "include";
+```
+
+Это должно быть централизовано в API client.
+
+Не писать `credentials: 'include'` вручную в каждом hook.
+
+---
+
+# Step 13 — Content-Type
+
+Если request содержит JSON:
+
+```text
+Content-Type: application/json
+```
+
+Но не ставить этот header слепо для любого возможного request.
+
+В будущем могут появиться:
+
+```text
+FormData
+file upload
+```
+
+Поэтому API wrapper должен быть достаточно простым и не ломать будущие non-JSON body.
+
+На текущем этапе главное корректно поддержать JSON API.
+
+---
+
+# Step 14 — 204 No Content
+
+Backend уже использует:
+
+```text
+204 No Content
+```
+
+например для:
+
+```text
+logout
+delete recipe
+```
+
+API client не должен делать:
+
+```ts
+await response.json();
+```
+
+для `204`.
+
+Иначе получим JSON parse error после успешного backend response.
+
+Добавь корректную обработку:
+
+```text
+204
+→ undefined
+```
+
+---
+
+# Step 15 — API errors
+
+Создай простой:
+
+```text
+ApiError
+```
+
+который хранит минимум:
+
+```text
+status
+message
+```
+
+При необходимости:
+
+```text
+body
+```
+
+Но не таскай весь Response object по application layer.
+
+---
+
+# Step 16 — NestJS error response
+
+Backend может возвращать:
+
+```json
+{
+  "statusCode": 400,
+  "message": "..."
+}
+```
+
+или:
+
+```json
+{
+  "statusCode": 400,
+  "message": ["...", "..."]
+}
+```
+
+API client должен корректно получить пользовательское/техническое сообщение.
+
+Если:
+
+```text
+message = string[]
+```
+
+можно объединить сообщения в понятную строку.
+
+Не привязывай всю архитектуру frontend к NestJS response format.
+
+Используй его только как один из поддерживаемых error payload formats.
+
+---
+
+# Step 17 — non-JSON error
+
+Backend/proxy может вернуть:
+
+```text
+502
+HTML response
+```
+
+или пустой response.
+
+API client не должен падать второй ошибкой при попытке распарсить JSON.
+
+В таком случае вернуть generic:
+
+```text
+Request failed
+```
+
+с HTTP status.
+
+---
+
+# Step 18 — network error
+
+Если fetch не получил HTTP response:
+
+```text
+network failure
+backend unavailable
+```
+
+API client должен вернуть понятный frontend error.
+
+Не придумывать HTTP status, которого не было.
+
+Например:
+
+```text
+status = null
+```
+
+допустимо.
+
+---
+
+# Step 19 — AbortSignal
+
+API client должен позволять передавать:
+
+```ts
+signal;
+```
+
+Чтобы TanStack Query мог отменять запросы.
+
+Не создавать собственную cancellation implementation.
+
+Использовать стандартный `AbortSignal`.
+
+---
+
+# Step 20 — типы API
+
+Создай небольшое место для общих API types, если это реально нужно.
+
+Например:
+
+```text
+src/shared/api/api.types.ts
+```
+
+Но не копируй туда сразу весь backend domain.
+
+На этом этапе не нужно создавать:
+
+```text
+Recipe
+User
+Ingredient
+Step
+```
+
+типы заранее.
+
+Они появятся на соответствующих frontend этапах.
+
+---
+
+# Step 21 — React Router foundation
+
+Приведи routing к понятной структуре.
+
+Routes на текущем этапе:
+
+```text
+/
+/login
+/recipes
+/*
+```
+
+Например:
+
+```text
+/           → HomePage
+/login      → LoginPage
+/recipes    → RecipesPage
+*           → NotFoundPage
+```
+
+Пока это placeholders.
+
+---
+
+# Step 22 — route definitions отдельно от page implementation
+
+Не помещать все route declarations в:
+
+```text
+main.tsx
+```
+
+Предпочтительно:
+
+```text
+src/app/router.tsx
+```
+
+или аналогичный файл.
+
+---
+
+# Step 23 — пока нет protected routes
+
+НЕ реализовывать сейчас:
+
+```text
+ProtectedRoute
+RequireAuth
+redirect unauthenticated user
+/auth/me query
+```
+
+Это задача:
+
+**Этап 9 — Frontend Authentication.**
+
+На Этапе 8 `/recipes` может быть обычной placeholder page.
+
+---
+
+# Step 24 — App Layout
+
+Создать минимальный общий layout.
+
+Например:
+
+```text
+AppLayout
+```
+
+Он может содержать:
+
+```text
+header
+main
+Outlet
+```
+
+Но дизайн пока должен быть минимальным.
+
+Не тратить время на:
+
+```text
+sidebar
+complex navigation
+mobile menu
+user menu
+animations
+```
+
+---
+
+# Step 25 — router layout
+
+Желательная структура:
+
+```text
+AppLayout
+├── HomePage
+├── RecipesPage
+└── ...
+```
+
+Но login в будущем может использовать отдельный auth layout.
+
+Не создавай второй layout сейчас, если он ничего не решает.
+
+---
+
+# Step 26 — Placeholder pages
+
+Создай минимальные:
+
+```text
+HomePage
+LoginPage
+RecipesPage
+NotFoundPage
+```
+
+Например только:
+
+```text
+Dishly
+Home
+
+Dishly
+Login
+
+Dishly
+Recipes
+```
+
+Не реализовывать настоящий UI.
+
+Не создавать формы.
+
+Не обращаться к Recipes API.
+
+---
+
+# Step 27 — Home route
+
+Реши простой временный вариант для:
+
+```text
+/
+```
+
+Например HomePage.
+
+Не строить landing page.
+
+В будущем `/` можно будет перенаправить на:
+
+```text
+/recipes
+```
+
+после внедрения Authentication.
+
+Сейчас этого не требуется.
+
+---
+
+# Step 28 — global CSS foundation
+
+Проверь текущий CSS.
+
+Удалить Vite demo styles.
+
+Создать очень небольшую базу:
+
+```text
+box-sizing
+body margin
+font inheritance
+basic background/text
+button/input font inheritance
+```
+
+Не создавать полноценный design system.
+
+---
+
+# Step 29 — дизайн
+
+Полноценный дизайн Dishly пока НЕ реализовывать.
+
+Мы позже будем адаптировать UI из предыдущего проекта под кухонную тематику.
+
+Сейчас допускаются только базовые neutral styles, чтобы страницы можно было использовать во время разработки.
+
+Не тратить время на:
+
+```text
+recipe cards
+food colors
+animations
+shadows system
+complex typography
+dark mode
+responsive dashboard
+```
+
+---
+
+# Step 30 — UI components
+
+Не создавать заранее:
+
+```text
+Button
+Input
+Modal
+Card
+Select
+Badge
+Spinner
+Toast
+```
+
+только потому, что они понадобятся позже.
+
+Создадим их тогда, когда появится реальное использование.
+
+На этом этапе `shared/ui` может вообще оставаться пустым или не существовать.
+
+Не создавать пустую директорию только ради структуры.
+
+---
+
+# Step 31 — Health check
+
+На Bootstrap этапе мог существовать временный frontend health query.
+
+Проверь его.
+
+Если он используется только как проверка связи:
+
+```text
+GET /health
+```
+
+и больше не нужен продукту, его можно удалить из пользовательского UI.
+
+Не создавай постоянную HealthPage.
+
+Если health query полезен как development smoke-test и не мешает архитектуре — можно оставить маленький dev-only механизм.
+
+Сначала объясни решение.
+
+---
+
+# Step 32 — не создавать API modules заранее
+
+На Этапе 8 НЕ создавать:
+
+```text
+auth.api.ts
+recipes.api.ts
+profile.api.ts
+```
+
+если они пока не используются.
+
+На следующем этапе появится:
+
+```text
+auth API
+```
+
+а затем:
+
+```text
+recipes API
+```
+
+Сейчас нужен только reusable transport layer:
+
+```text
+apiRequest()
+```
+
+---
+
+# Step 33 — TanStack Query Devtools
+
+Не устанавливать автоматически.
+
+Если уже установлены — оцени, нужны ли они.
+
+Если нет:
+
+```text
+@tanstack/react-query-devtools
+```
+
+не обязательны для MVP.
+
+Не устанавливать package только ради nice-to-have.
+
+---
+
+# Step 34 — ESLint
+
+Не переписывать ESLint configuration без необходимости.
+
+Проверить существующие правила.
+
+Новые файлы должны проходить:
 
 ```bash
-npm run queue:smoke
+npm run lint
 ```
 
-не должен сломаться.
-
-Если инфраструктура доступна — повторно проверить.
-
-Не переписывай smoke script без необходимости.
+Не делать большой formatting/lint refactor всего frontend.
 
 ---
 
-# Step 57 — parser regression
-
-Существующий:
-
-```bash
-npm run parser:smoke -- <URL>
-```
-
-должен продолжать работать.
-
-Parser остаётся независимым от PostgreSQL/Redis.
-
-Это важная архитектурная проверка.
-
----
-
-# Step 58 — migration regression
-
-Schema на этом этапе менять не требуется.
-
-Проверить:
-
-```bash
-npm run migration:show
-```
-
-Не создавать новую migration.
-
-Не редактировать:
-
-```text
-CreateInitialSchema
-```
-
----
-
-# Step 59 — frontend
-
-Frontend НЕ менять.
-
-Не создавать:
-
-```text
-Add Recipe modal
-processing cards
-polling
-recipes hooks
-```
-
-Это следующие этапы.
-
----
-
-# Step 60 — AI
-
-AI не добавлять.
-
-Не менять parser strategy.
-
-Не добавлять:
-
-```text
-OpenAI
-Gemini
-LLM fallback
-```
-
----
-
-# Step 61 — не добавлять Outbox
+# Step 35 — path aliases
 
 Не вводить:
 
 ```text
-Transactional Outbox
-Kafka
-RabbitMQ
-event sourcing
-distributed transactions
+@/app
+@/shared
+@/pages
 ```
 
-ради решения PostgreSQL + Redis consistency.
+только потому, что это красиво.
 
-Для MVP достаточно:
+Если текущие относительные imports остаются короткими и понятными:
 
-```text
-create Recipe
-↓
-enqueue
-↓
-если enqueue fail → FAILED
+```ts
+../shared/api/api-client
 ```
 
-В финальном review можно зафиксировать outbox как production improvement.
+этого достаточно.
+
+Path alias можно добавить позже, если nesting реально станет проблемой.
+
+Не усложнять Vite + tsconfig без необходимости.
 
 ---
 
-# Step 62 — final checks
+# Step 36 — Barrel exports
 
-Выполнить:
+Не создавать в каждой директории:
+
+```text
+index.ts
+```
+
+автоматически.
+
+Barrel exports использовать только если они реально улучшают imports.
+
+Избегать circular dependencies.
+
+---
+
+# Step 37 — tests для API client
+
+API transport layer — важная foundation.
+
+Добавь focused tests, если текущая frontend test infrastructure уже существует или её можно добавить без большого отдельного setup.
+
+Обязательно проверить поведение:
+
+```text
+200 JSON
+204 No Content
+400 JSON error
+500 non-JSON error
+network failure
+credentials included
+base URL
+AbortSignal forwarding
+```
+
+Если frontend test runner ещё вообще не настроен и его настройка станет отдельным большим проектом, не добавляй Jest/Vitest infrastructure только ради одного helper.
+
+В таком случае:
+
+1. объясни отсутствие test setup;
+2. проверяй TypeScript/build/lint;
+3. автоматические frontend tests добавим на финальном testing этапе или при первой реальной feature.
+
+Не переусложнять.
+
+---
+
+# Step 38 — проверить API client через /health
+
+Для manual verification можно временно использовать:
+
+```text
+GET /health
+```
+
+через новый API client.
+
+Цель:
+
+```text
+frontend API client
+↓
+NestJS
+↓
+200
+```
+
+Не превращай health в пользовательскую feature.
+
+После проверки временный UI можно убрать.
+
+---
+
+# Step 39 — environment docs
+
+Проверь:
+
+```text
+apps/frontend/.env.example
+```
+
+Должно присутствовать:
+
+```env
+VITE_API_URL=http://localhost:3000
+```
+
+Не помещать туда secrets.
+
+Frontend environment variables являются публичными для browser bundle.
+
+Никогда не помещать туда:
+
+```text
+JWT_SECRET
+DB_PASSWORD
+REDIS_PASSWORD
+```
+
+---
+
+# Step 40 — README
+
+Обновить README только если текущие инструкции запуска frontend устарели.
+
+Не документировать ещё не существующие frontend features.
+
+Достаточно, чтобы разработчик понимал:
+
+```text
+как создать .env
+как запустить frontend
+какой backend URL нужен
+```
+
+---
+
+# Step 41 — scope: что НЕ делать
+
+На Этапе 8 категорически НЕ реализовывать:
+
+```text
+Register form
+Login form
+Logout button
+
+GET /auth/current or /auth/me integration
+auth context
+auth query
+protected routes
+
+Recipes API hooks
+Recipe list
+Recipe card
+Recipe details
+
+Add Recipe modal
+POST /recipes/import
+
+processing polling
+retry button
+
+Profile
+
+i18n
+
+Redux
+
+AI
+
+shopping list
+```
+
+Это последующие этапы.
+
+---
+
+# Step 42 — backend scope
+
+Backend на Этапе 8 не менять.
+
+Не исправлять parser.
+
+Не менять queue.
+
+Не менять migrations.
+
+Не менять Recipe Entity.
+
+Не менять Authentication API.
+
+Если frontend обнаружит настоящий backend contract bug — сначала сообщи и остановись, прежде чем менять backend.
+
+---
+
+# Step 43 — expected result structure
+
+После завершения структура должна быть примерно:
+
+```text
+src/
+├── app/
+│   ├── App.tsx
+│   ├── router.tsx
+│   └── providers/
+│       └── AppProviders.tsx
+│
+├── pages/
+│   ├── HomePage/
+│   │   └── HomePage.tsx
+│   ├── LoginPage/
+│   │   └── LoginPage.tsx
+│   ├── RecipesPage/
+│   │   └── RecipesPage.tsx
+│   └── NotFoundPage/
+│       └── NotFoundPage.tsx
+│
+├── shared/
+│   ├── api/
+│   │   ├── api-client.ts
+│   │   └── api-error.ts
+│   │
+│   └── config/
+│       └── env.ts
+│
+├── main.tsx
+└── ...
+```
+
+Не воспринимать это как обязательство создать каждый файл.
+
+Если часть структуры пока не нужна — не создавать её.
+
+---
+
+# Step 44 — manual navigation verification
+
+Запустить:
+
+```bash
+npm run dev
+```
+
+Проверить:
+
+```text
+/
+```
+
+открывается.
+
+```text
+/login
+```
+
+открывается.
+
+```text
+/recipes
+```
+
+открывается.
+
+```text
+/something-that-does-not-exist
+```
+
+показывает NotFoundPage.
+
+Перезагрузка браузера непосредственно на `/recipes` не должна ломать development app.
+
+---
+
+# Step 45 — API verification
+
+Проверить:
+
+```text
+VITE_API_URL
+↓
+apiRequest('/health')
+↓
+backend
+```
+
+Убедиться:
+
+- URL собирается правильно;
+- credentials включены;
+- JSON parse работает;
+- network failure обрабатывается;
+- API URL не захардкожен.
+
+---
+
+# Step 46 — build
+
+Выполнить из:
+
+```text
+apps/frontend
+```
 
 ```bash
 npm run build
 npm run lint
-npm test
-npm run migration:show
 ```
 
-Из root:
+Если frontend tests существуют:
 
 ```bash
-docker compose ps
+npm test
 ```
 
-Также:
+или соответствующую команду текущего проекта.
+
+Не придумывай команду, которой нет в `package.json`.
+
+---
+
+# Step 47 — regression
+
+Поскольку backend не меняется:
+
+не нужно повторно прогонять весь backend test suite только ради frontend restructuring.
+
+Но убедись через `git diff`, что backend действительно не изменён.
+
+---
+
+# Step 48 — Git check
+
+Перед завершением:
 
 ```bash
 git status
@@ -2249,240 +1501,182 @@ git diff
 git diff --check
 ```
 
-Не утверждай, что проверка выполнена, если она реально не запускалась.
-
----
-
-# Step 63 — regression
-
-Убедиться, что продолжают работать:
+Проверь, что случайно не добавлены:
 
 ```text
-Authentication
-GET /recipes
-GET /recipes/:id
-DELETE /recipes/:id
-
-Queue tests
-Parser tests
+.env
+dist
+node_modules
+IDE files
 ```
-
-Не исправляй unrelated код, если regressions нет.
 
 ---
 
 # Definition of Done
 
-Этап 7 считается завершённым только если:
+Этап 8 считается завершённым, если:
 
 ```text
-[ ] ImportRecipeDto создан
+[ ] существующий frontend полностью изучен
 
-[ ] POST /recipes/import существует
+[ ] Vite demo code удалён
 
-[ ] endpoint protected authentication
+[ ] main.tsx минимальный
 
-[ ] userId берётся только из current user
+[ ] application providers структурированы
 
-[ ] unsupported URL отклоняется до INSERT
+[ ] один QueryClient используется всем приложением
 
-[ ] unsupported URL не создаёт job
+[ ] QueryClient не создаётся внутри render
 
-[ ] sourceUrl хранится нормализованным
+[ ] React Router структурирован отдельно
 
-[ ] Recipe создаётся PENDING
+[ ] / работает
 
-[ ] queue получает только recipeId
+[ ] /login работает
 
-[ ] enqueue failure не оставляет PENDING навсегда
+[ ] /recipes работает
 
-[ ] enqueue failure → FAILED
+[ ] 404 route работает
 
-[ ] enqueue failure → подходящий HTTP error
+[ ] существует минимальный общий layout
 
-[ ] processor загружает Recipe из PostgreSQL
+[ ] полноценный UI ещё не реализован
 
-[ ] processor использует Recipe.sourceUrl
+[ ] VITE_API_URL читается централизованно
 
-[ ] processor не получает URL из Redis
+[ ] VITE_API_URL валидируется
 
-[ ] PENDING → PROCESSING
+[ ] backend URL не захардкожен
 
-[ ] RecipeParserService вызывается worker-ом
+[ ] единый API client создан
 
-[ ] ParsedRecipe сохраняется
+[ ] API client использует credentials: include
 
-[ ] Recipe поля обновляются
+[ ] API client умеет отправлять JSON
 
-[ ] ingredients сохраняются
+[ ] API client умеет читать JSON
 
-[ ] steps сохраняются
+[ ] API client корректно обрабатывает 204
 
-[ ] ingredient positions начинаются с 1
+[ ] ApiError реализован
 
-[ ] step positions начинаются с 1
+[ ] NestJS validation errors обрабатываются
 
-[ ] save выполняется внутри transaction
+[ ] non-JSON error не ломает API client
 
-[ ] внутри transaction используется transactional manager
+[ ] network error обрабатывается
 
-[ ] успешный import → COMPLETED
+[ ] AbortSignal поддерживается
 
-[ ] success очищает errorMessage
+[ ] /health можно вызвать через API client
 
-[ ] permanent parser error → FAILED
+[ ] Redux не добавлен
 
-[ ] permanent parser error не делает лишние retries
+[ ] Axios не добавлен без необходимости
 
-[ ] retryable parser error использует BullMQ retry
+[ ] Auth UI не реализован
 
-[ ] intermediate retry не ставит FAILED
+[ ] Auth state не реализован
 
-[ ] final failed attempt → FAILED
+[ ] ProtectedRoute не реализован
 
-[ ] unexpected failures не проглатываются
+[ ] Recipes API integration не реализована
 
-[ ] удалённый Recipe не восстанавливается worker-ом
+[ ] Add Recipe не реализован
 
-[ ] COMPLETED stale job не парсится заново
+[ ] i18n не добавлен
 
-[ ] FAILED stale job не парсится заново
+[ ] backend не изменён
 
-[ ] POST /recipes/:id/retry существует
+[ ] frontend build проходит
 
-[ ] retry доступен только владельцу
+[ ] frontend lint проходит
 
-[ ] retry разрешён только для FAILED
-
-[ ] invalid retry status → 409
-
-[ ] retry → PENDING
-
-[ ] retry очищает errorMessage
-
-[ ] retry enqueue failure → FAILED
-
-[ ] raw technical errors не отдаются frontend
-
-[ ] errorMessage не раскрыт через public response
-
-[ ] API unit tests проходят
-
-[ ] import service tests проходят
-
-[ ] processor tests проходят
-
-[ ] parser tests продолжают проходить
-
-[ ] queue tests продолжают проходить
-
-[ ] Auth tests продолжают проходить
-
-[ ] build проходит
-
-[ ] lint проходит
-
-[ ] полный test suite проходит
-
-[ ] migration schema не изменена
-
-[ ] новая migration не создана
-
-[ ] frontend не изменён
-
-[ ] AI не добавлен
-
-[ ] live import Good Food проверен либо блокирующая причина явно зафиксирована
+[ ] git diff чист от случайных файлов
 ```
 
 ---
 
 # Финальный review
 
-После завершения НЕ переходи автоматически к frontend.
+После завершения не переходи автоматически к Auth.
 
-Дай отчёт.
+Составь отчёт.
 
 ## Что изменено
 
-Перечисли новые и изменённые файлы.
+Перечисли файлы.
 
-## Import architecture
+## Frontend architecture
+
+Покажи итоговую структуру:
+
+```text
+app
+pages
+shared
+```
+
+и коротко объясни ответственность каждого слоя.
+
+## App startup
 
 Покажи:
 
 ```text
-POST /recipes/import
-        ↓
-PENDING
-        ↓
-BullMQ
-        ↓
-PROCESSING
-        ↓
-Parser
-        ↓
-Transaction
-        ↓
-COMPLETED
+main
+↓
+providers
+↓
+router
+↓
+pages
 ```
 
-## Failure architecture
+## API layer
 
-Покажи отдельно:
+Объясни:
 
 ```text
-retryable
+component / future hook
+↓
+apiRequest
+↓
+fetch
+↓
+NestJS
 ```
 
-и:
+## Cookies
+
+Подтверди:
 
 ```text
-permanent
+credentials: include
 ```
 
-ошибки.
+и объясни, почему это необходимо для Dishly HttpOnly JWT auth.
 
-## Transaction
+## Routes
 
-Объясни, какие операции входят в одну PostgreSQL transaction.
+Перечисли существующие placeholder routes.
 
-## API
+## Validation
 
-Перечисли итоговые routes:
+Укажи реальные результаты:
 
 ```text
-GET    /recipes
-GET    /recipes/:id
-DELETE /recipes/:id
-POST   /recipes/import
-POST   /recipes/:id/retry
+build
+lint
+tests, если существуют
+manual navigation
+/health request
 ```
-
-## Manual verification
-
-Укажи реальный результат Good Food import:
-
-```text
-recipe id
-final status
-title
-servings
-ingredients count
-steps count
-```
-
-## Tests
-
-Какие команды реально запускались и результат.
-
-## Database
-
-Подтверди отсутствие schema changes.
 
 ## MUST FIX
 
-Что блокирует следующий этап.
+Проблемы, блокирующие Auth frontend.
 
 ## SHOULD IMPROVE
 
@@ -2490,27 +1684,20 @@ steps count
 
 ## OPTIONAL
 
-Например:
-
-```text
-transactional outbox
-advanced observability
-```
-
-но не реализовывать их сейчас.
+То, что можно сделать позже.
 
 ## VERDICT
 
-Напиши однозначно:
+Однозначно:
 
 ```text
-Этап 7 готов к переходу на Этап 8
+Этап 8 готов к переходу на Этап 9 — Frontend Authentication.
 ```
 
 или:
 
 ```text
-Этап 7 пока не готов
+Этап 8 пока не готов.
 ```
 
 с причиной.
@@ -2521,21 +1708,41 @@ advanced observability
 apps/codex/AGENT_PROGRESS.md
 ```
 
-так, чтобы следующая Codex session могла продолжить проект без истории этого чата.
+Зафиксируй:
 
-Не создавай Git commit без моего отдельного разрешения.
+- новую frontend структуру;
+- API client;
+- env handling;
+- QueryClient;
+- router;
+- выполненные проверки;
+- что backend не менялся;
+- следующий этап.
+
+Не создавай Git commit без моего разрешения.
 
 ---
 
 # Следующий этап
 
-После моего отдельного разрешения:
+После моего разрешения:
 
-**Этап 8 — Frontend Architecture / Foundation.**
+**Этап 9 — Frontend Authentication**
 
-Там мы начнём подключать frontend к уже полностью работающему backend.
+Там будут реализованы:
 
-Но сейчас frontend НЕ трогать.
+```text
+Register
+Login
+Current User
+Logout
+Protected Routes
+Auth loading state
+```
+
+на базе уже подготовленного API layer и TanStack Query.
+
+Но сейчас ничего из этого не реализовывать.
 
 ---
 
@@ -2543,20 +1750,20 @@ apps/codex/AGENT_PROGRESS.md
 
 Начни только со:
 
-**Step 1 — аудит integration points.**
+**Step 1 — аудит текущего frontend.**
 
 Пока ничего не меняй.
 
-После аудита покажи:
+Покажи:
 
-1. что можно переиспользовать без изменений;
-2. какие новые файлы предлагаешь;
-3. какие существующие файлы нужно изменить;
-4. как будет разделена ответственность между `RecipesService`, `RecipeImportService` и `RecipeImportProcessor`;
-5. как будет выполняться PostgreSQL transaction;
-6. как будет определяться последняя BullMQ attempt;
-7. как permanent errors будут останавливать retries;
-8. нужна ли migration;
-9. какие риски видишь.
+1. текущую структуру frontend;
+2. что осталось от Vite demo;
+3. как сейчас настроен React Router;
+4. как сейчас настроен TanStack Query;
+5. как используется `VITE_API_URL`;
+6. есть ли frontend test infrastructure;
+7. какие файлы предлагаешь создать/переместить/удалить;
+8. какие dependencies реально нужны;
+9. видишь ли ты архитектурные проблемы.
 
 После этого остановись и дождись моего ответа.
